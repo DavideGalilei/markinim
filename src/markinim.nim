@@ -1,4 +1,4 @@
-import std/[asyncdispatch, logging, options, os, times, strutils, strformat, tables, random, sets, parsecfg, sequtils]
+import std/[asyncdispatch, logging, options, os, times, strutils, strformat, tables, random, sets, parsecfg, sequtils, streams]
 import telebot, norm / [model, sqlite], nimkov / generator
 import ./database
 
@@ -95,7 +95,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       discard await bot.sendMessage(message.chat.id, &"You are not allowed to perform this command")
       return
     discard await bot.sendMessage(message.chat.id,
-      &"*Users*: `{conn.getCount(database.User)}`\n*Chats*: `{conn.getCount(database.Chat)}`",
+      &"*Users*: `{conn.getCount(database.User)}`\n*Chats*: `{conn.getCount(database.Chat)}`\n*Messages:* `{conn.getCount(database.Message)}`",
       parseMode = "markdown")
   of "enable", "disable":
     if message.chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = message.chat.id, userId = senderId):
@@ -199,9 +199,11 @@ proc updateHandler(bot: Telebot, u: Update): Future[bool] {.async, gcsafe.} =
 
 proc main {.async.} =
   let
-    config = loadConfig(currentSourcePath.parentDir / "../secret.ini")
-    botToken = config.getSectionValue("config", "token")
-    admin = config.getSectionValue("config", "admin")
+    configFile = currentSourcePath.parentDir / "../secret.ini"
+    config = if fileExists(configFile): loadConfig(configFile)
+      else: loadConfig(newStringStream())
+    botToken = config.getSectionValue("config", "token", getEnv("BOT_TOKEN"))
+    admin = config.getSectionValue("config", "admin", getEnv("ADMIN_ID"))
 
   conn = initDatabase("markov.db")
 

@@ -1,8 +1,9 @@
-FROM nimlang/nim
+FROM nimlang/nim:1.6.2
 
 COPY . /code
 WORKDIR /code
 
-RUN nimble install
+RUN nimble install -y
+# RUN nim c -d:release -d:ssl -o:markinim src/markinim.nim
 
-CMD [ "./markov" ]
+CMD [ "./markinim" ]
