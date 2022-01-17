@@ -14,8 +14,8 @@ var
   antiFlood: Table[int64, seq[int64]]
 
 const
-  ANTIFLOOD_SECONDS = 30
-  ANTIFLOOD_RATE = 3
+  ANTIFLOOD_SECONDS = 15
+  ANTIFLOOD_RATE = 5
 
 let t = epochTime()
 
