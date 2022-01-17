@@ -213,7 +213,7 @@ proc updateHandler(bot: Telebot, u: Update): Future[bool] {.async, gcsafe.} =
         if generated.isSome:
           discard await bot.sendMessage(chatId, generated.get())
   except Exception as error:
-    error(&"{$typeof(error)}: {getCurrentExceptionMsg()}")
+    L.log(lvlError, &"{$typeof(error)}: {getCurrentExceptionMsg()}")
 
 
 proc main {.async.} =
