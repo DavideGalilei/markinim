@@ -80,9 +80,9 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       discard conn.setAdmin(userId = userId, admin = (command == "admin"))
       
       if command == "admin":
-        admins.incl(senderId)
+        admins.incl(userId)
       else:
-        admins.excl(senderId)
+        admins.excl(userId)
 
       discard await bot.sendMessage(message.chat.id,
         if command == "admin": &"Successfully promoted [{userId}](tg://user?id={userId})"
