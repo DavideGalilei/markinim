@@ -14,6 +14,8 @@ var
   antiFlood: Table[int64, seq[int64]]
 
 const
+  MARKOV_DB = "markov.db"
+
   ANTIFLOOD_SECONDS = 15
   ANTIFLOOD_RATE = 5
 
@@ -65,9 +67,15 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
 
   case command:
   of "start":
+    const startMessage = "Hello, I learn from your messages and try to formulate my own sentences. Add me in a chat or send /enable to try me out here ᗜᴗᗜ"
     if message.chat.id != senderId: # /start only works in PMs
+      if len(args) > 0 and args[0] == "enable":
+        discard await bot.sendMessage(message.chat.id, startMessage)
       return
-    discard await bot.sendMessage(message.chat.id, "gtfo")
+    discard await bot.sendMessage(message.chat.id,
+      startMessage,
+      replyMarkup = newInlineKeyboardMarkup(@[InlineKeyboardButton(text: "Add me :D", url: some &"https://t.me/{botUsername}?startgroup=enable")])
+    )
   of "admin", "unadmin", "remadmin":
     if len(args) < 1:
       return
@@ -122,7 +130,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       if percentage notin 1 .. 100:
         discard await bot.sendMessage(message.chat.id, "Percentage must be a number between 1 and 100")
 
-      var chat = conn.getChat(chatId = message.chat.id)
+      var chat = conn.getOrInsert(database.Chat(chatId: message.chat.id))
       chat.percentage = percentage
       conn.update(chat)
 
@@ -130,7 +138,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
     except ValueError:
       discard await bot.sendMessage(message.chat.id, "The value you inserted is not a number")
   of "markov":
-    let enabled = conn.getChat(chatId = message.chat.id).enabled
+    let enabled = conn.getOrInsert(database.Chat(chatId: message.chat.id)).enabled
     if not enabled:
       discard bot.sendMessage(message.chat.id, "Learning is not enabled in this chat. Enable it with /enable (for groups: admins only)")
       return
@@ -146,55 +154,66 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       discard await bot.sendMessage(message.chat.id, generated.get())
     else:
       discard await bot.sendMessage(message.chat.id, "Not enough data to generate a sentence")
+  of "export":
+    if senderId notin admins:
+      # discard await bot.sendMessage(message.chat.id, &"You are not allowed to perform this command")
+      return
+    let tmp = getTempDir()
+    copyFileToDir(MARKOV_DB, tmp)
+    discard await bot.sendDocument(senderId, "file://" & (tmp / MARKOV_DB))
+    discard tryRemoveFile(tmp / MARKOV_DB)
 
 
 proc updateHandler(bot: Telebot, u: Update): Future[bool] {.async, gcsafe.} =
-  if not u.message.isSome:
-    # return true will make bot stop process other callbacks
-    return true
-
-  let
-    response = u.message.get
-    msgUser = response.fromUser.get
-    chatId = response.chat.id
-
-  if response.text.isSome:
-    var
-      text = response.text.get
-      splitted = text.split()
-      command = splitted[0].strip(chars = {'/'}, trailing = false)
-      args = if len(splitted) > 1: splitted[1 .. ^1] else: @[]
-
-    if text.startswith('/'):
-      if msgUser.id notin admins and isFlood(chatId):
-        return true
-
-      if '@' in text:
-        let splittedCommand = text.split('@')
-        if splittedCommand[^1].toLower() != botUsername:
-          return true
-        command = splittedCommand[0]
-      await handleCommand(bot, u, command, args)
+  try:
+    if not u.message.isSome:
+      # return true will make bot stop process other callbacks
       return true
 
-    let chat = conn.getOrInsert(database.Chat(chatId: chatId))
-    if not chat.enabled:
-      return
+    let
+      response = u.message.get
+      msgUser = response.fromUser.get
+      chatId = response.chat.id
 
-    if not markovs.hasKeyOrPut(chatId, newMarkov(@[text])):
-      for message in conn.getLatestMessages(chatId = chatId):
-        if message.text != "":
-          markovs[chatId].addSample(message.text)
-    else:
-      markovs[chatId].addSample(text)
+    if response.text.isSome or response.caption.isSome:
+      var
+        text = if response.text.isSome: response.text.get else: response.caption.get
+        splitted = text.split()
+        command = splitted[0].strip(chars = {'/'}, trailing = false)
+        args = if len(splitted) > 1: splitted[1 .. ^1] else: @[]
 
-    let user = conn.getOrInsert(database.User(userId: msgUser.id))
-    conn.addMessage(database.Message(text: text, sender: user, chat: chat))
+      if text.startswith('/'):
+        if msgUser.id notin admins and isFlood(chatId):
+          return true
 
-    if rand(0 .. 100) <= chat.percentage:
-      let generated = markovs[chatId].generate()
-      if generated.isSome:
-        discard await bot.sendMessage(chatId, generated.get())
+        if '@' in command:
+          let splittedCommand = command.split('@')
+          if splittedCommand[^1].toLower() != botUsername:
+            return true
+          command = splittedCommand[0]
+        await handleCommand(bot, u, command, args)
+        return true
+
+      let chat = conn.getOrInsert(database.Chat(chatId: chatId))
+      if not chat.enabled:
+        return
+
+      if not markovs.hasKeyOrPut(chatId, newMarkov(@[text])):
+        for message in conn.getLatestMessages(chatId = chatId):
+          if message.text != "":
+            markovs[chatId].addSample(message.text)
+      else:
+        markovs[chatId].addSample(text)
+
+      let user = conn.getOrInsert(database.User(userId: msgUser.id))
+      conn.addMessage(database.Message(text: text, sender: user, chat: chat))
+
+      if rand(0 .. 100) <= chat.percentage:
+        let generated = markovs[chatId].generate()
+        if generated.isSome:
+          discard await bot.sendMessage(chatId, generated.get())
+  except Exception as error:
+    error(&"{$typeof(error)}: {getCurrentExceptionMsg()}")
 
 
 proc main {.async.} =
@@ -205,10 +224,13 @@ proc main {.async.} =
     botToken = config.getSectionValue("config", "token", getEnv("BOT_TOKEN"))
     admin = config.getSectionValue("config", "admin", getEnv("ADMIN_ID"))
 
-  conn = initDatabase("markov.db")
+  conn = initDatabase(MARKOV_DB)
 
   if admin != "":
     admins.incl(conn.setAdmin(userId = parseBiggestInt(admin)).userId)
+  
+  for admin in conn.getBotAdmins():
+    admins.incl(admin.userId)
 
   let bot = newTeleBot(botToken)
   botUsername = (await bot.getMe()).username.get().toLower()

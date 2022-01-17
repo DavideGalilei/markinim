@@ -79,6 +79,10 @@ proc getLatestMessages*(conn: DbConn, chatId: int64, count: int = 500): seq[Mess
   result = @[Message(sender: User(), chat: Chat())]
   conn.select(result, "chatId = ? ORDER BY messages.id DESC LIMIT ?", chatId, count)
 
+proc getBotAdmins*(conn: DbConn): seq[User] =
+  result = @[User()]
+  conn.select(result, "admin = true")
+
 proc setAdmin*(conn: DbConn, userId: int64, admin: bool = true): User =
   result = conn.updateOrCreate(User(userId: userId, admin: admin))
 
