@@ -29,7 +29,7 @@ proc isFlood(chatId: int64, rate: int = ANTIFLOOD_RATE, seconds: int = ANTIFLOOD
     antiFlood[chatId].add(time)
 
   antiflood[chatId] = antiflood[chatId].filterIt(time - it < seconds)
-  return len(antiflood[chatId]) >= rate
+  return len(antiflood[chatId]) > rate
 
 proc cleanerWorker {.async.} =
   while true:
@@ -209,7 +209,7 @@ proc updateHandler(bot: Telebot, u: Update): Future[bool] {.async, gcsafe.} =
       let user = conn.getOrInsert(database.User(userId: msgUser.id))
       conn.addMessage(database.Message(text: text, sender: user, chat: chat))
 
-      if rand(0 .. 100) <= chat.percentage and not isFlood(chatId):
+      if rand(0 .. 100) <= chat.percentage and not isFlood(chatId, rate = 12, seconds = 10):
         let generated = markovs[chatId].generate()
         if generated.isSome:
           discard await bot.sendMessage(chatId, generated.get())
