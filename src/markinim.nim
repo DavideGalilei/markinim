@@ -208,7 +208,7 @@ proc updateHandler(bot: Telebot, u: Update): Future[bool] {.async, gcsafe.} =
       let user = conn.getOrInsert(database.User(userId: msgUser.id))
       conn.addMessage(database.Message(text: text, sender: user, chat: chat))
 
-      if rand(0 .. 100) <= chat.percentage:
+      if rand(0 .. 100) <= chat.percentage and not isFlood(chatId):
         let generated = markovs[chatId].generate()
         if generated.isSome:
           discard await bot.sendMessage(chatId, generated.get())
