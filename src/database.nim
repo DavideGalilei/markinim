@@ -77,7 +77,7 @@ proc addMessage*(conn: DbConn, message: Message) =
   var message = message
   conn.insert message
 
-proc getLatestMessages*(conn: DbConn, chatId: int64, count: int = 500): seq[Message] =
+proc getLatestMessages*(conn: DbConn, chatId: int64, count: int = 1500): seq[Message] =
   result = @[Message(sender: User(), chat: Chat())]
   conn.select(result, "chatId = ? ORDER BY messages.id DESC LIMIT ?", chatId, count)
 
