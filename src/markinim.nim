@@ -129,6 +129,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
 
       if percentage notin 1 .. 100:
         discard await bot.sendMessage(message.chat.id, "Percentage must be a number between 1 and 100")
+        return
 
       var chat = conn.getOrInsert(database.Chat(chatId: message.chat.id))
       chat.percentage = percentage
