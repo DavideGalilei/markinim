@@ -41,7 +41,8 @@ const DEFAULT_TRIGGER_PERCENTAGE = 30#%
 proc addChat*(conn: DbConn, chat: Chat): Chat =
   var chat = chat
   if chat.percentage == 0:
-    chat.percentage = DEFAULT_TRIGGER_PERCENTAGE
+    chat.percentage = if chat.chatId < 0: DEFAULT_TRIGGER_PERCENTAGE
+      else: 100
   conn.insert chat
   return conn.getChat(chat.chatId)
 
