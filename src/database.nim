@@ -43,8 +43,7 @@ proc addChat*(conn: DbConn, chat: Chat): Chat =
   if chat.percentage == 0:
     chat.percentage = if chat.chatId < 0: DEFAULT_TRIGGER_PERCENTAGE
       else: 100
-  if chat.chatId > 0:
-    chat.enabled = true
+  chat.enabled = chat.chatId > 0
   conn.insert chat
   return conn.getChat(chat.chatId)
 
