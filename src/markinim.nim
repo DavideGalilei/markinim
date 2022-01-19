@@ -33,9 +33,17 @@ proc isFlood(chatId: int64, rate: int = ANTIFLOOD_RATE, seconds: int = ANTIFLOOD
 
 proc cleanerWorker {.async.} =
   while true:
-    let time = getTime().toUnix
-    for chatId in antiFlood.keys:
-      antiFlood[chatId] = antiflood[chatId].filterIt(time - it < ANTIFLOOD_SECONDS)
+    let
+      time = getTime().toUnix
+      keys = antiFlood.keys.toSeq()
+
+    for chatId in keys:
+      let messages = antiflood[chatId].filterIt(time - it < ANTIFLOOD_SECONDS)
+      if len(messages) != 0:
+        antiFlood[chatId] = antiflood[chatId].filterIt(time - it < ANTIFLOOD_SECONDS)
+      else:
+        antiflood.del(chatId)
+
     await sleepAsync(30)
 
 proc isAdminInGroup(bot: Telebot, chatId: int64, userId: int64): Future[bool] {.async.} =
@@ -226,6 +234,7 @@ proc main {.async.} =
     admin = config.getSectionValue("config", "admin", getEnv("ADMIN_ID"))
 
   conn = initDatabase(MARKOV_DB)
+  defer: conn.close()
 
   if admin != "":
     admins.incl(conn.setAdmin(userId = parseBiggestInt(admin)).userId)
