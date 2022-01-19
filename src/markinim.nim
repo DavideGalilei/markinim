@@ -9,9 +9,11 @@ var
   conn: DbConn
   botUsername: string
   admins: HashSet[int64]
-  markovs: Table[int64, MarkovGenerator]
+  markovs: Table[int64, (MarkovGenerator, int64)]
   adminsCache: Table[(int64, int64), (int64, bool)] # (chatId, userId): (unixtime, isAdmin) cache
   antiFlood: Table[int64, seq[int64]]
+
+let uptime = epochTime()
 
 const
   MARKOV_DB = "markov.db"
@@ -19,10 +21,17 @@ const
   ANTIFLOOD_SECONDS = 15
   ANTIFLOOD_RATE = 5
 
+  MARKOV_SAMPLES_CACHE_TIMEOUT = 60 * 30 # 30 minutes
   GROUP_ADMINS_CACHE_TIMEOUT = 60 * 5 # result is valid for five minutes
 
+template get(self: Table[int64, (MarkovGenerator, int64)], chatId: int64): MarkovGenerator =
+  self[chatId][0]
+
+template unixTime: int64 =
+  getTime().toUnix
+
 proc isFlood(chatId: int64, rate: int = ANTIFLOOD_RATE, seconds: int = ANTIFLOOD_SECONDS): bool =
-  let time = getTime().toUnix
+  let time = unixTime()
   if chatId notin antiFlood:
     antiflood[chatId] = @[time]
   else:
@@ -34,7 +43,7 @@ proc isFlood(chatId: int64, rate: int = ANTIFLOOD_RATE, seconds: int = ANTIFLOOD
 proc cleanerWorker {.async.} =
   while true:
     let
-      time = getTime().toUnix
+      time = unixTime()
       antiFloodKeys = antiFlood.keys.toSeq()
 
     for chatId in antiFloodKeys:
@@ -49,11 +58,17 @@ proc cleanerWorker {.async.} =
       let (timestamp, isAdmin) = adminsCache[record]
       if time - timestamp > GROUP_ADMINS_CACHE_TIMEOUT:
         adminsCache.del(record)
+    
+    let markovsKeys = markovs.keys.toSeq()
+    for record in markovsKeys:
+      let (_, timestamp) = markovs[record]
+      if time - timestamp > MARKOV_SAMPLES_CACHE_TIMEOUT:
+        markovs.del(record)
 
     await sleepAsync(30)
 
 proc isAdminInGroup(bot: Telebot, chatId: int64, userId: int64): Future[bool] {.async.} =
-  let time = getTime().toUnix
+  let time = unixTime()
   if (chatId, userId) in adminsCache:
     let (_, isAdmin) = adminsCache[(chatId, userId)]
     return isAdmin
@@ -89,6 +104,8 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       startMessage,
       replyMarkup = newInlineKeyboardMarkup(@[InlineKeyboardButton(text: "Add me :D", url: some &"https://t.me/{botUsername}?startgroup=enable")])
     )
+  of "help":
+    discard
   of "admin", "unadmin", "remadmin":
     if len(args) < 1:
       return
@@ -111,12 +128,12 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
         parseMode = "markdown")
     except Exception as error:
       discard await bot.sendMessage(message.chat.id, &"An error occurred: <code>{$typeof(error)}: {getCurrentExceptionMsg()}</code>", parseMode = "html")
-  of "count":
+  of "count", "stats":
     if senderId notin admins:
       discard await bot.sendMessage(message.chat.id, &"You are not allowed to perform this command")
       return
     discard await bot.sendMessage(message.chat.id,
-      &"*Users*: `{conn.getCount(database.User)}`\n*Chats*: `{conn.getCount(database.Chat)}`\n*Messages:* `{conn.getCount(database.Message)}`",
+      &"*Users*: `{conn.getCount(database.User)}`\n*Chats*: `{conn.getCount(database.Chat)}`\n*Messages:* `{conn.getCount(database.Message)}`\n*Uptime*: `{toInt(epochTime() - uptime)}`s",
       parseMode = "markdown")
   of "enable", "disable":
     if message.chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = message.chat.id, userId = senderId):
@@ -133,8 +150,13 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
     if message.chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = message.chat.id, userId = senderId):
       discard await bot.sendMessage(message.chat.id, "You are not allowed to perform this command")
       return
-    elif len(args) < 1:
-      discard await bot.sendMessage(message.chat.id, "This command needs an argument. Example: `/percentage 40` (default: `30`)", parseMode = "markdown")
+    
+    var chat = conn.getOrInsert(database.Chat(chatId: message.chat.id))
+    if len(args) == 0:
+      discard await bot.sendMessage(message.chat.id,
+        "This command needs an argument. Example: `/percentage 40` (default: `30`)\n" &
+        &"Current percentage: `{chat.percentage}`%",
+        parseMode = "markdown")
       return
 
     try:
@@ -144,11 +166,12 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
         discard await bot.sendMessage(message.chat.id, "Percentage must be a number between 1 and 100")
         return
 
-      var chat = conn.getOrInsert(database.Chat(chatId: message.chat.id))
       chat.percentage = percentage
       conn.update(chat)
 
-      discard await bot.sendMessage(message.chat.id, "Percentage has been successfully updated")
+      discard await bot.sendMessage(message.chat.id,
+        &"Percentage has been successfully updated to `{percentage}`%",
+        parseMode = "markdown")
     except ValueError:
       discard await bot.sendMessage(message.chat.id, "The value you inserted is not a number")
   of "markov":
@@ -158,12 +181,16 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       return
     
     if not markovs.hasKey(message.chat.id):
-      markovs[message.chat.id] = newMarkov(@[])
+      markovs[message.chat.id] = (newMarkov(@[]), unixTime())
       for dbMessage in conn.getLatestMessages(chatId = message.chat.id):
         if dbMessage.text != "":
-          markovs[message.chat.id].addSample(dbMessage.text)
+          markovs.get(message.chat.id).addSample(dbMessage.text)
 
-    let generated = markovs[message.chat.id].generate()
+    if len(markovs.get(message.chat.id).getSamples()) == 0:
+      discard await bot.sendMessage(message.chat.id, "Not enough data to generate a sentence")
+      return
+
+    let generated = markovs.get(message.chat.id).generate()
     if generated.isSome:
       discard await bot.sendMessage(message.chat.id, generated.get())
     else:
@@ -176,19 +203,55 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
     copyFileToDir(MARKOV_DB, tmp)
     discard await bot.sendDocument(senderId, "file://" & (tmp / MARKOV_DB))
     discard tryRemoveFile(tmp / MARKOV_DB)
+  of "settings":
+    discard
+  of "distort":
+    discard
+  of "hazmat":
+    discard
+  of "delete":
+    var deleting {.global.}: HashSet[int64]
+
+    if message.chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = message.chat.id, userId = senderId):
+      discard await bot.sendMessage(message.chat.id, "You are not allowed to perform this command")
+      return
+    elif message.chat.id in deleting:
+      discard await bot.sendMessage(message.chat.id, "I am already deleting the messages from my database. Please hold on")
+    elif len(args) > 0 and args[0].toLower() == "confirm":
+      deleting.incl(message.chat.id)
+      defer: deleting.excl(message.chat.id)
+      try:
+        let sentMessage = await bot.sendMessage(message.chat.id, "I am deleting data for this chat...")
+        let deleted = conn.deleteMessages(message.chat.id)
+
+        if markovs.hasKey(message.chat.id):
+          markovs.del(message.chat.id)
+
+        discard await bot.editMessageText(chatId = $message.chat.id, messageId = sentMessage.messageId,
+          text = &"Operation completed. Successfully deleted `{deleted}` messages from my database!",
+          parseMode = "markdown"
+        )
+        return
+      except Exception as error:
+        discard await bot.sendMessage(message.chat.id, text = "An error occurred. Operation has been aborted.", replyToMessageId = message.messageId)
+        raise
+    else:
+      discard await bot.sendMessage(message.chat.id,
+        "If you are sure to delete data in this chat, send `/delete confirm`. *NOTE*: This cannot be reverted",
+        parseMode = "markdown")
 
 
 proc updateHandler(bot: Telebot, u: Update): Future[bool] {.async, gcsafe.} =
-  try:
-    if not u.message.isSome:
+  if not u.message.isSome:
       # return true will make bot stop process other callbacks
       return true
 
-    let
-      response = u.message.get
-      msgUser = response.fromUser.get
-      chatId = response.chat.id
+  let
+    response = u.message.get
+    msgUser = response.fromUser.get
+    chatId = response.chat.id
 
+  try:
     if response.text.isSome or response.caption.isSome:
       var
         text = if response.text.isSome: response.text.get else: response.caption.get
@@ -212,22 +275,30 @@ proc updateHandler(bot: Telebot, u: Update): Future[bool] {.async, gcsafe.} =
       if not chat.enabled:
         return
 
-      if not markovs.hasKeyOrPut(chatId, newMarkov(@[text])):
+      if not markovs.hasKeyOrPut(chatId, (newMarkov(@[text]), unixTime())):
         for message in conn.getLatestMessages(chatId = chatId):
           if message.text != "":
-            markovs[chatId].addSample(message.text)
+            markovs.get(chatId).addSample(message.text)
       else:
-        markovs[chatId].addSample(text)
+        markovs.get(chatId).addSample(text)
 
       let user = conn.getOrInsert(database.User(userId: msgUser.id))
       conn.addMessage(database.Message(text: text, sender: user, chat: chat))
 
-      if rand(0 .. 100) <= chat.percentage and not isFlood(chatId, rate = 12, seconds = 10):
-        let generated = markovs[chatId].generate()
+      if rand(0 .. 100) <= chat.percentage and not isFlood(chatId, rate = 10, seconds = 60): # Max 10 messages per chat per minute
+        let generated = markovs.get(chatId).generate()
         if generated.isSome:
           discard await bot.sendMessage(chatId, generated.get())
+  except IOError:
+    if "Bad Request: have no rights to send a message" in getCurrentExceptionMsg():
+      try:
+        discard await bot.leaveChat(chatId = $chatId)
+      except: discard
+    let msg = getCurrentExceptionMsg()
+    L.log(lvlError, &"{$typeof(error)}: " & msg)
   except Exception as error:
-    L.log(lvlError, &"{$typeof(error)}: {getCurrentExceptionMsg()}")
+    let msg = getCurrentExceptionMsg()
+    L.log(lvlError, &"{$typeof(error)}: " & msg)
 
 
 proc main {.async.} =
@@ -253,7 +324,7 @@ proc main {.async.} =
   asyncCheck cleanerWorker()
 
   bot.onUpdate(updateHandler)
-  await bot.pollAsync(timeout = 300, clean = true)
+  await bot.pollAsync(timeout = 200, clean = true)
 
 when isMainModule:
   when defined(windows):
@@ -261,9 +332,8 @@ when isMainModule:
       echo "You can't run this on windows after a day"
       quit(1)
 
-  let t = epochTime()
   try:
     waitFor main()
   except KeyboardInterrupt:
-    echo "\nQuitting...\nProgram has run for ", toInt(epochTime() - t), " seconds."
+    echo "\nQuitting...\nProgram has run for ", toInt(epochTime() - uptime), " seconds."
     quit(0)
