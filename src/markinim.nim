@@ -2,7 +2,7 @@ import std/[asyncdispatch, logging, options, os, times, strutils, strformat, tab
 import telebot, norm / [model, sqlite], nimkov / generator
 import ./database
 
-var L = newConsoleLogger(fmtStr="$levelname, [$time] ")
+var L = newConsoleLogger(fmtStr="$levelname | [$time] ")
 addHandler(L)
 
 var
@@ -19,7 +19,7 @@ const
   ANTIFLOOD_SECONDS = 15
   ANTIFLOOD_RATE = 5
 
-let t = epochTime()
+  GROUP_ADMINS_CACHE_TIMEOUT = 60 * 5 # result is valid for five minutes
 
 proc isFlood(chatId: int64, rate: int = ANTIFLOOD_RATE, seconds: int = ANTIFLOOD_SECONDS): bool =
   let time = getTime().toUnix
@@ -35,30 +35,35 @@ proc cleanerWorker {.async.} =
   while true:
     let
       time = getTime().toUnix
-      keys = antiFlood.keys.toSeq()
+      antiFloodKeys = antiFlood.keys.toSeq()
 
-    for chatId in keys:
+    for chatId in antiFloodKeys:
       let messages = antiflood[chatId].filterIt(time - it < ANTIFLOOD_SECONDS)
       if len(messages) != 0:
         antiFlood[chatId] = antiflood[chatId].filterIt(time - it < ANTIFLOOD_SECONDS)
       else:
         antiflood.del(chatId)
+    
+    let adminsCacheKeys = adminsCache.keys.toSeq()
+    for record in adminsCacheKeys:
+      let (timestamp, isAdmin) = adminsCache[record]
+      if time - timestamp > GROUP_ADMINS_CACHE_TIMEOUT:
+        adminsCache.del(record)
 
     await sleepAsync(30)
 
 proc isAdminInGroup(bot: Telebot, chatId: int64, userId: int64): Future[bool] {.async.} =
   let time = getTime().toUnix
   if (chatId, userId) in adminsCache:
-    let (timestamp, isAdmin) = adminsCache[(chatId, userId)]
-    if not time - timestamp > (5 * 60): # result is valid for five minutes
-      return isAdmin
+    let (_, isAdmin) = adminsCache[(chatId, userId)]
+    return isAdmin
 
   try:
     let member = await bot.getChatMember(chatId = $chatId, userId = userId.int)
     result = member.status == "creator" or member.status == "administrator"
   except Exception:
     result = false
-  
+
   adminsCache[(chatId, userId)] = (time, result)
 
 
@@ -256,6 +261,7 @@ when isMainModule:
       echo "You can't run this on windows after a day"
       quit(1)
 
+  let t = epochTime()
   try:
     waitFor main()
   except KeyboardInterrupt:
