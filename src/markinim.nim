@@ -23,7 +23,7 @@ const
   MARKOV_DB = "markov.db"
 
   ANTIFLOOD_SECONDS = 10
-  ANTIFLOOD_RATE = 6
+  ANTIFLOOD_RATE = 5
 
   MARKOV_SAMPLES_CACHE_TIMEOUT = 60 * 30 # 30 minutes
   GROUP_ADMINS_CACHE_TIMEOUT = 60 * 5 # result is valid for five minutes
@@ -546,9 +546,8 @@ proc main {.async.} =
 
   asyncCheck cleanerWorker()
 
-  discard await bot.getUpdates(offset = -1)
   bot.onUpdate(updateHandler)
-  await bot.pollAsync(timeout = 300, clean = true)
+  await bot.pollAsync(timeout = 200, clean = true)
 
 when isMainModule:
   when defined(windows):
