@@ -283,7 +283,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
     if not enabled:
       discard bot.sendMessage(message.chat.id, "Learning is not enabled in this chat. Enable it with /enable (for groups: admins only)")
       return
-    
+
     if not markovs.hasKey(message.chat.id):
       markovs[message.chat.id] = (unixTime(), newMarkov(@[]))
       for dbMessage in conn.getLatestMessages(session = conn.getCachedSession(message.chat.id)):
@@ -381,8 +381,12 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
       discard await bot.answerCallbackQuery(callback.id, "This is already the default session for this chat", showAlert = true)
       return
 
-    let sessions = conn.setDefaultSession(chatId = chatId, uuid = uuid)
-    chatSessions[chatId] = (unixTime(), sessions.filterIt(it.isDefault)[0])
+    let
+      sessions = conn.setDefaultSession(chatId = chatId, uuid = uuid)
+      newSession = sessions.filterIt(it.isDefault)[0]
+    chatSessions[chatId] = (unixTime(), newSession)
+
+    markovs[chatId] = (unixTime(), newMarkov(conn.getLatestMessages(session = newSession).mapIt(it.text)))
 
     await bot.showSessions(chatId = callback.message.get().chat.id,
       messageId = callback.message.get().messageId,
