@@ -372,7 +372,7 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
       chatId = parseBiggestInt(args[0])
       uuid = args[1]
 
-    if not await bot.isAdminInGroup(chatId = chatId, userId = userId):
+    if callback.message.get().chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = chatId, userId = userId):
       discard await bot.answerCallbackQuery(callback.id, UNALLOWED, showAlert = true)
       return
 
@@ -392,7 +392,7 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
   of "addsession":
     let chatId = parseBiggestInt(args[0])
 
-    if not await bot.isAdminInGroup(chatId = chatId, userId = userId):
+    if callback.message.get().chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = chatId, userId = userId):
       discard await bot.answerCallbackQuery(callback.id, UNALLOWED, showAlert = true)
       return
     discard await bot.answerCallbackQuery(callback.id)
