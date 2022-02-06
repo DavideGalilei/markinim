@@ -1,6 +1,8 @@
-import std/[asyncdispatch, logging, options, os, times, strutils, strformat, tables, random, sets, parsecfg, sequtils, streams]
+import std/[asyncdispatch, logging, options, os, times, strutils, strformat, tables, random, sets, parsecfg, sequtils, streams, sugar]
 import telebot, norm / [model, sqlite], nimkov / generator
+
 import ./database
+import ./utils/[unixtime, timeout, listen]
 
 var L = newConsoleLogger(fmtStr="$levelname | [$time] ")
 addHandler(L)
@@ -9,8 +11,10 @@ var
   conn: DbConn
   botUsername: string
   admins: HashSet[int64]
-  markovs: Table[int64, (MarkovGenerator, int64)]
+  banned: HashSet[int64]
+  markovs: Table[int64, (int64, MarkovGenerator)] # (chatId): (timestamp, MarkovChain)
   adminsCache: Table[(int64, int64), (int64, bool)] # (chatId, userId): (unixtime, isAdmin) cache
+  chatSessions: Table[int64, (int64, Session)] # (chatId): (unixtime, Session) cache
   antiFlood: Table[int64, seq[int64]]
 
 let uptime = epochTime()
@@ -18,17 +22,24 @@ let uptime = epochTime()
 const
   MARKOV_DB = "markov.db"
 
-  ANTIFLOOD_SECONDS = 15
-  ANTIFLOOD_RATE = 5
+  ANTIFLOOD_SECONDS = 10
+  ANTIFLOOD_RATE = 6
 
   MARKOV_SAMPLES_CACHE_TIMEOUT = 60 * 30 # 30 minutes
   GROUP_ADMINS_CACHE_TIMEOUT = 60 * 5 # result is valid for five minutes
+  MARKOV_CHAT_SESSIONS_TIMEOUT = 60 * 30 # 30 minutes
 
-template get(self: Table[int64, (MarkovGenerator, int64)], chatId: int64): MarkovGenerator =
-  self[chatId][0]
+  MAX_SESSIONS = 20
+  MAX_FREE_SESSIONS = 5
+  MAX_SESSION_NAME_LENGTH = 16
 
-template unixTime: int64 =
-  getTime().toUnix
+  UNALLOWED = "You are not allowed to perform this command"
+
+template get(self: Table[int64, (int64, MarkovGenerator)], chatId: int64): MarkovGenerator =
+  self[chatId][1]
+
+proc mention(user: database.User): string =
+  return &"[{user.userId}](tg://user?id={user.userId})"
 
 proc isFlood(chatId: int64, rate: int = ANTIFLOOD_RATE, seconds: int = ANTIFLOOD_SECONDS): bool =
   let time = unixTime()
@@ -39,6 +50,14 @@ proc isFlood(chatId: int64, rate: int = ANTIFLOOD_RATE, seconds: int = ANTIFLOOD
 
   antiflood[chatId] = antiflood[chatId].filterIt(time - it < seconds)
   return len(antiflood[chatId]) > rate
+
+proc getCachedSession*(conn: DbConn, chatId: int64): database.Session =
+  if chatId in chatSessions:
+    let (_, session) = chatSessions[chatId]
+    return session
+
+  result = conn.getDefaultSession(chatId)
+  chatSessions[chatId] = (unixTime(), result)
 
 proc cleanerWorker {.async.} =
   while true:
@@ -55,15 +74,21 @@ proc cleanerWorker {.async.} =
     
     let adminsCacheKeys = adminsCache.keys.toSeq()
     for record in adminsCacheKeys:
-      let (timestamp, isAdmin) = adminsCache[record]
+      let (timestamp, _) = adminsCache[record]
       if time - timestamp > GROUP_ADMINS_CACHE_TIMEOUT:
         adminsCache.del(record)
     
     let markovsKeys = markovs.keys.toSeq()
     for record in markovsKeys:
-      let (_, timestamp) = markovs[record]
+      let (timestamp, _) = markovs[record]
       if time - timestamp > MARKOV_SAMPLES_CACHE_TIMEOUT:
         markovs.del(record)
+
+    let chatSessionsKeys = chatSessions.keys.toSeq()
+    for record in chatSessionsKeys:
+      let (timestamp, _) = chatSessions[record]
+      if time - timestamp > MARKOV_CHAT_SESSIONS_TIMEOUT:
+        chatSessions.del(record)
 
     await sleepAsync(30)
 
@@ -88,6 +113,22 @@ proc handler() {.noconv.} =
 setControlCHook(handler)
 
 
+proc showSessions(bot: Telebot, chatId, messageId: int64, sessions: seq[Session] = @[]) {.async.} =
+  var sessions = sessions
+  if sessions.len == 0:
+    sessions = conn.getSessions(chatId = chatId)
+
+  discard await bot.editMessageText(chatId = $chatId,
+    messageId = int(messageId),
+    text = "*Current sessions in this chat.* Send /delete to delete the current one.",
+    replyMarkup = newInlineKeyboardMarkup(
+      sessions.mapIt(
+        @[InlineKeyboardButton(text: if it.isDefault: &"{it.name} 🎩" else: it.name, callbackData: some &"set_{chatId}_{it.uuid}")]
+      ) & @[InlineKeyboardButton(text: "Add session", callbackData: some &"addsession_{chatId}")]
+    ),
+    parseMode = "markdown",
+  )
+
 proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[string]) {.async.} =
   let
     message = update.message.get
@@ -110,7 +151,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
     if len(args) < 1:
       return
     elif senderId notin admins:
-      discard await bot.sendMessage(message.chat.id, &"You are not allowed to perform this command")
+      discard await bot.sendMessage(message.chat.id, UNALLOWED)
       return
 
     try:
@@ -128,16 +169,62 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
         parseMode = "markdown")
     except Exception as error:
       discard await bot.sendMessage(message.chat.id, &"An error occurred: <code>{$typeof(error)}: {getCurrentExceptionMsg()}</code>", parseMode = "html")
+  of "botadmins":
+    if senderId notin admins:
+      discard await bot.sendMessage(message.chat.id, UNALLOWED)
+      return
+
+    let admins = conn.getBotAdmins()
+
+    discard await bot.sendMessage(message.chat.id,
+      "*List of the bot admins:*\n" &
+      admins.mapIt("~ " & it.mention).join("\n"),
+      parseMode = "markdown",
+    )
   of "count", "stats":
     if senderId notin admins:
-      discard await bot.sendMessage(message.chat.id, &"You are not allowed to perform this command")
+      discard await bot.sendMessage(message.chat.id, UNALLOWED)
       return
     discard await bot.sendMessage(message.chat.id,
-      &"*Users*: `{conn.getCount(database.User)}`\n*Chats*: `{conn.getCount(database.Chat)}`\n*Messages:* `{conn.getCount(database.Message)}`\n*Uptime*: `{toInt(epochTime() - uptime)}`s",
+      &"*Users*: `{conn.getCount(database.User)}`\n" &
+      &"*Chats*: `{conn.getCount(database.Chat)}`\n" &
+      &"*Messages*: `{conn.getCount(database.Message)}`\n" &
+      &"*Sessions*: `{conn.getCount(database.Session)}`\n" &
+      &"*Uptime*: `{toInt(epochTime() - uptime)}`s",
       parseMode = "markdown")
+  of "banpeer", "unbanpeer":
+    const banCommand = "banpeer"
+
+    if len(args) < 1:
+      return
+    elif senderId notin admins:
+      discard await bot.sendMessage(message.chat.id, UNALLOWED)
+      return
+
+    try:
+      let peerId = parseBiggestInt(args[0])
+      if peerId == senderId:
+        discard await bot.sendMessage(message.chat.id, "You are not allowed to ban yourself")
+        return
+      elif peerId < 0:
+        discard conn.setBanned(chatId = peerId, banned = (command == banCommand))
+      else:
+        discard conn.setBanned(userId = peerId, banned = (command == banCommand))
+
+      if command == banCommand:
+        banned.incl(peerId)
+      else:
+        banned.excl(peerId)
+
+      discard await bot.sendMessage(message.chat.id,
+        if command == banCommand: &"Successfully banned [{peerId}](tg://user?id={peerId})"
+        else: &"Successfully unbanned [{peerId}](tg://user?id={peerId})",
+        parseMode = "markdown")
+    except Exception as error:
+      discard await bot.sendMessage(message.chat.id, &"An error occurred: <code>{$typeof(error)}: {getCurrentExceptionMsg()}</code>", parseMode = "html")
   of "enable", "disable":
     if message.chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = message.chat.id, userId = senderId):
-      discard await bot.sendMessage(message.chat.id, "You are not allowed to perform this command")
+      discard await bot.sendMessage(message.chat.id, UNALLOWED)
       return
 
     discard conn.setEnabled(message.chat.id, enabled = (command == "enable"))
@@ -146,11 +233,26 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       if command == "enable": "Successfully enabled learning in this chat"
       else: "Successfully disabled learning in this chat"
     )
+  of "sessions":
+    if message.chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = message.chat.id, userId = senderId):
+      discard await bot.sendMessage(message.chat.id, UNALLOWED)
+      return
+
+    let sessions = conn.getSessions(message.chat.id)
+    discard await bot.sendMessage(message.chat.id,
+      "*Current sessions in this chat*",
+      replyMarkup = newInlineKeyboardMarkup(
+        sessions.mapIt(
+          @[InlineKeyboardButton(text: if it.isDefault: &"{it.name} 🎩" else: it.name, callbackData: some &"set_{message.chat.id}_{it.uuid}")]
+        ) & @[InlineKeyboardButton(text: "Add session", callbackData: some &"addsession_{message.chat.id}")]
+      ),
+      parseMode = "markdown",
+    )
   of "percentage":
     if message.chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = message.chat.id, userId = senderId):
-      discard await bot.sendMessage(message.chat.id, "You are not allowed to perform this command")
+      discard await bot.sendMessage(message.chat.id, UNALLOWED)
       return
-    
+
     var chat = conn.getOrInsert(database.Chat(chatId: message.chat.id))
     if len(args) == 0:
       discard await bot.sendMessage(message.chat.id,
@@ -181,8 +283,8 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       return
     
     if not markovs.hasKey(message.chat.id):
-      markovs[message.chat.id] = (newMarkov(@[]), unixTime())
-      for dbMessage in conn.getLatestMessages(chatId = message.chat.id):
+      markovs[message.chat.id] = (unixTime(), newMarkov(@[]))
+      for dbMessage in conn.getLatestMessages(session = conn.getCachedSession(message.chat.id)):
         if dbMessage.text != "":
           markovs.get(message.chat.id).addSample(dbMessage.text)
 
@@ -197,7 +299,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       discard await bot.sendMessage(message.chat.id, "Not enough data to generate a sentence")
   of "export":
     if senderId notin admins:
-      # discard await bot.sendMessage(message.chat.id, &"You are not allowed to perform this command")
+      # discard await bot.sendMessage(message.chat.id, UNALLOWED)
       return
     let tmp = getTempDir()
     copyFileToDir(MARKOV_DB, tmp)
@@ -213,7 +315,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
     var deleting {.global.}: HashSet[int64]
 
     if message.chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = message.chat.id, userId = senderId):
-      discard await bot.sendMessage(message.chat.id, "You are not allowed to perform this command")
+      discard await bot.sendMessage(message.chat.id, UNALLOWED)
       return
     elif message.chat.id in deleting:
       discard await bot.sendMessage(message.chat.id, "I am already deleting the messages from my database. Please hold on")
@@ -221,11 +323,17 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       deleting.incl(message.chat.id)
       defer: deleting.excl(message.chat.id)
       try:
-        let sentMessage = await bot.sendMessage(message.chat.id, "I am deleting data for this chat...")
-        let deleted = conn.deleteMessages(message.chat.id)
+        let 
+          sentMessage = await bot.sendMessage(message.chat.id, "I am deleting data for this session...")
+          defaultSession = conn.getCachedSession(message.chat.id)
+          deleted = conn.deleteMessages(session = defaultSession)
 
         if markovs.hasKey(message.chat.id):
           markovs.del(message.chat.id)
+        
+        if conn.getSessionsCount(chatId = message.chat.id) < 2:
+          conn.delete(defaultSession.dup)
+          chatSessions[message.chat.id] = (unixTime(), conn.getCachedSession(chatId = message.chat.id))
 
         discard await bot.editMessageText(chatId = $message.chat.id, messageId = sentMessage.messageId,
           text = &"Operation completed. Successfully deleted `{deleted}` messages from my database!",
@@ -234,25 +342,134 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
         return
       except Exception as error:
         discard await bot.sendMessage(message.chat.id, text = "An error occurred. Operation has been aborted.", replyToMessageId = message.messageId)
-        raise
+        raise error
     else:
       discard await bot.sendMessage(message.chat.id,
-        "If you are sure to delete data in this chat, send `/delete confirm`. *NOTE*: This cannot be reverted",
+        "If you are sure to delete data in this chat (of the current session), send `/delete confirm`. *NOTE*: This cannot be reverted",
         parseMode = "markdown")
 
 
-proc updateHandler(bot: Telebot, u: Update): Future[bool] {.async, gcsafe.} =
-  if not u.message.isSome:
+proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
+  let
+    callback = update.callbackQuery.get()
+    userId = callback.fromUser.id
+    data = callback.data.get()
+  
+  let
+    splitted = data.split('_')
+    command = splitted[0]
+    args = splitted[1 .. ^1]
+  
+  case command:
+  of "set":
+    if len(args) < 2:
+      discard await bot.answerCallbackQuery(callback.id, "Error: try again with a new message", showAlert = true)
+      return
+
+    let
+      chatId = parseBiggestInt(args[0])
+      uuid = args[1]
+
+    if not await bot.isAdminInGroup(chatId = chatId, userId = userId):
+      discard await bot.answerCallbackQuery(callback.id, UNALLOWED, showAlert = true)
+      return
+
+    try:
+      let default = conn.getCachedSession(chatId = chatId)
+      if default.uuid == uuid:
+        discard await bot.answerCallbackQuery(callback.id, "This is already the default session for this chat", showAlert = true)
+        return
+    except:
+      discard
+
+    let sessions = conn.setDefaultSession(chatId = chatId, uuid = uuid)
+    await bot.showSessions(chatId = callback.message.get().chat.id,
+      messageId = callback.message.get().messageId,
+      sessions = sessions)
+
+    discard await bot.answerCallbackQuery(callback.id, "Done", showAlert = true)
+  of "addsession":
+    let chatId = parseBiggestInt(args[0])
+
+    if not await bot.isAdminInGroup(chatId = chatId, userId = userId):
+      discard await bot.answerCallbackQuery(callback.id, UNALLOWED, showAlert = true)
+      return
+    discard await bot.answerCallbackQuery(callback.id)
+    
+    let chat = conn.getChat(chatId = chatId)
+    let sessionsCount = conn.getSessionsCount(chatId)
+    if sessionsCount >= MAX_FREE_SESSIONS or sessionsCount >= MAX_SESSIONS and not chat.premium:
+      let currentMax = if sessionsCount >= MAX_SESSIONS: MAX_SESSIONS else: MAX_FREE_SESSIONS
+      discard await bot.editMessageText(chatId = $callback.message.get().chat.id,
+        messageId = callback.message.get().messageId,
+        text = &"You cannot add more than {currentMax} sessions per chat.",
+      )
+      return
+
+    discard await bot.editMessageText(chatId = $callback.message.get().chat.id,
+      messageId = callback.message.get().messageId,
+      text = "*Send me the name for the new session.* Send /cancel to cancel the current operation.",
+      parseMode = "markdown",
+    )
+
+    try:
+      var message = (await getMessage(userId = userId, chatId = chatId)).message.get()
+      while not message.text.isSome or message.caption.isSome:
+        message = (await getMessage(userId = userId, chatId = chatId)).message.get()
+      let text = if message.text.isSome: message.text.get else: message.caption.get()
+
+      if text.toLower().startswith("/cancel"):
+        discard await bot.editMessageText(chatId = $callback.message.get().chat.id,
+          messageId = callback.message.get().messageId,
+          text = "*Operation cancelled...*",
+          parseMode = "markdown",
+        )
+        await sleepAsync(3 * 1000)
+        discard await bot.deleteMessage(chatId = $callback.message.get().chat.id,
+          messageId = callback.message.get().messageId,
+        )
+        return
+      elif text.len > MAX_SESSION_NAME_LENGTH:
+        discard await bot.editMessageText(chatId = $callback.message.get().chat.id,
+          messageId = callback.message.get().messageId,
+          text = &"*Operation cancelled...* The session name is longer than `{MAX_SESSION_NAME_LENGTH}` characters",
+          parseMode = "markdown",
+        )
+        return
+
+      chatSessions[chatId] = (unixTime(), conn.addSession(Session(name: text, chat: conn.getChat(chatId))))
+      await bot.showSessions(chatId = callback.message.get().chat.id, messageId = callback.message.get().messageId)
+    except TimeoutError:
+      discard await bot.deleteMessage(chatId = $callback.message.get().chat.id,
+        messageId = callback.message.get().messageId,
+      )
+
+proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.} =
+  if await listenUpdater(bot, update):
+    return
+  if not (update.message.isSome or update.callbackQuery.isSome):
       # return true will make bot stop process other callbacks
       return true
 
-  let
-    response = u.message.get
-    msgUser = response.fromUser.get
-    chatId = response.chat.id
-
   try:
+    if update.callbackQuery.isSome:
+      let msgUser = update.callbackQuery.get().fromUser
+      if msgUser.id in banned:
+        return true
+
+      await handleCallbackQuery(bot, update)
+      return true
+    elif not update.message.isSome:
+      return true
+
+    let response = update.message.get
     if response.text.isSome or response.caption.isSome:
+      let
+        msgUser = response.fromUser.get
+        chatId = response.chat.id
+      if msgUser.id notin admins and chatId in banned or msgUser.id in banned:
+        return true
+
       var
         text = if response.text.isSome: response.text.get else: response.caption.get
         splitted = text.split()
@@ -268,22 +485,22 @@ proc updateHandler(bot: Telebot, u: Update): Future[bool] {.async, gcsafe.} =
           if splittedCommand[^1].toLower() != botUsername:
             return true
           command = splittedCommand[0]
-        await handleCommand(bot, u, command, args)
+        await handleCommand(bot, update, command, args)
         return true
 
       let chat = conn.getOrInsert(database.Chat(chatId: chatId))
       if not chat.enabled:
         return
 
-      if not markovs.hasKeyOrPut(chatId, (newMarkov(@[text]), unixTime())):
-        for message in conn.getLatestMessages(chatId = chatId):
+      if not markovs.hasKeyOrPut(chatId, (unixTime(), newMarkov(@[text]))):
+        for message in conn.getLatestMessages(session = conn.getCachedSession(chatId)):
           if message.text != "":
             markovs.get(chatId).addSample(message.text)
       else:
         markovs.get(chatId).addSample(text)
 
       let user = conn.getOrInsert(database.User(userId: msgUser.id))
-      conn.addMessage(database.Message(text: text, sender: user, chat: chat))
+      conn.addMessage(database.Message(text: text, sender: user, session: conn.getCachedSession(chat.chatId)))
 
       if rand(0 .. 100) <= chat.percentage and not isFlood(chatId, rate = 10, seconds = 60): # Max 10 messages per chat per minute
         let generated = markovs.get(chatId).generate()
@@ -292,13 +509,16 @@ proc updateHandler(bot: Telebot, u: Update): Future[bool] {.async, gcsafe.} =
   except IOError:
     if "Bad Request: have no rights to send a message" in getCurrentExceptionMsg():
       try:
-        discard await bot.leaveChat(chatId = $chatId)
+        if update.message.isSome():
+          let chatId = update.message.get().chat.id
+          discard await bot.leaveChat(chatId = $chatId)
       except: discard
     let msg = getCurrentExceptionMsg()
     L.log(lvlError, &"{$typeof(error)}: " & msg)
   except Exception as error:
     let msg = getCurrentExceptionMsg()
     L.log(lvlError, &"{$typeof(error)}: " & msg)
+    raise error
 
 
 proc main {.async.} =
@@ -317,6 +537,9 @@ proc main {.async.} =
   
   for admin in conn.getBotAdmins():
     admins.incl(admin.userId)
+
+  for bannedUser in conn.getBannedUsers():
+    banned.incl(bannedUser.userId)
 
   let bot = newTeleBot(botToken)
   botUsername = (await bot.getMe()).username.get().toLower()

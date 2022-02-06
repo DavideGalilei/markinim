@@ -1,5 +1,5 @@
 import
-  os,
+  std / [os, oids],
   norm / model,
   norm / pragmas,
   norm / sqlite
@@ -39,6 +39,7 @@ type
 
   Session* {.tableName: "sessions".} = ref object of Model
     name*: string
+    uuid* {.unique.}: string
     chat* {.onDelete: "CASCADE".}: Chat
     isDefault*: bool
 
@@ -75,7 +76,7 @@ proc main =
   var newChats: seq[Chat] = @[Chat()]
   newConn.selectAll(newChats)
   for chat in newChats:
-    var session = Session(name: "default", chat: chat, isDefault: true)
+    var session = Session(name: "default", uuid: $genOid(), chat: chat, isDefault: true)
     newConn.insert(session)
 
   var selectedUsers: seq[OldUser] = @[OldUser()]

@@ -1,4 +1,5 @@
 import
+  std / [oids, options],
   norm / model,
   norm / pragmas,
   norm / sqlite
@@ -7,22 +8,40 @@ type
   User* {.tableName: "users".} = ref object of Model
     userId* {.unique.}: int64
     admin*: bool
+    banned*: bool
 
   Chat* {.tableName: "chats".} = ref object of Model
     chatId* {.unique.}: int64
     enabled*: bool
     percentage*: int
 
+    premium*: bool
+    banned*: bool
+
+    blockLinks*: bool
+    blockUsernames*: bool
+    keepSfw*: bool # [BETA]
+    #    https://www.surgehq.ai/blog/the-obscenity-list-surge
+    # -> https://www.kaggle.com/nicapotato/bad-bad-words
+
+  Session* {.tableName: "sessions".} = ref object of Model
+    name*: string
+    uuid* {.unique.}: string
+    chat* {.onDelete: "CASCADE".}: Chat
+    isDefault*: bool
+
   Message* {.tableName: "messages".} = ref object of Model
+    session* {.onDelete: "CASCADE".}: Session
     sender*: User
-    chat*: Chat
     text*: string
 
 
 proc initDatabase*(name: string = "markov.db"): DbConn =
   result = open(name, "", "", "")
   result.createTables(User())
-  result.createTables(Message(sender: User(), chat: Chat()))
+  result.createTables(Chat())
+  result.createTables(Session(chat: Chat()))
+  result.createTables(Message(sender: User(), session: Session(chat: Chat())))
 
 proc getUser*(conn: DbConn, userId: int64): User =
   new result
@@ -32,10 +51,47 @@ proc getChat*(conn: DbConn, chatId: int64): Chat =
   new result
   conn.select(result, "chats.chatId = ?", chatId)
 
+proc getSession*(conn: DbConn, uuid: string): Session =
+  result = Session(chat: Chat())
+  conn.select(result, "uuid = ?", uuid)
+
+proc getSessions*(conn: DbConn, chatId: int64): seq[Session] =
+  result = @[Session(chat: Chat())]
+  conn.select(result, "chatId = ?", chatId)
+
 proc addUser*(conn: DbConn, user: User): User =
   var user = user
   conn.insert user
   return conn.getUser(user.userId)
+
+proc addSession*(conn: DbConn, session: Session): Session =
+  var session = session
+  session.uuid = $genOid()
+  conn.insert session
+  return conn.getSession(session.uuid)
+
+proc getDefaultSession*(conn: DbConn, chatId: int64): Session =
+  result = Session(chat: Chat())
+  try:
+    conn.select(result, "chat.chatId = ? AND isDefault", chatId)
+  except NotFoundError:
+    return conn.addSession(Session(
+      name: "default",
+      uuid: $genOid(),
+      chat: conn.getChat(chatId),
+      isDefault: true,
+    ))
+
+proc setDefaultSession*(conn: DbConn, chatId: int64, uuid: string): seq[Session] =
+  for session in conn.getSessions(chatId = chatId):
+    var session = session
+    if session.uuid == uuid:
+      session.isDefault = true
+      conn.update(session)
+    elif session.isDefault:
+      session.isDefault = false
+      conn.update(session)
+    result.add(session)
 
 const DEFAULT_TRIGGER_PERCENTAGE = 30#%
 proc addChat*(conn: DbConn, chat: Chat): Chat =
@@ -45,7 +101,15 @@ proc addChat*(conn: DbConn, chat: Chat): Chat =
       else: 100
   chat.enabled = chat.chatId > 0
   conn.insert chat
-  return conn.getChat(chat.chatId)
+
+  result = conn.getChat(chat.chatId)
+  
+  discard conn.addSession(Session(
+    name: "default",
+    uuid: $genOid(),
+    chat: result,
+    isDefault: true,
+  ))
 
 proc getOrInsert*(conn: DbConn, user: User): User =
   try:
@@ -58,6 +122,12 @@ proc getOrInsert*(conn: DbConn, chat: Chat): Chat =
     return conn.getChat(chat.chatId)
   except NotFoundError:
     return conn.addChat(chat) 
+
+proc getOrInsert*(conn: DbConn, session: Session): Session =
+  try:
+    return conn.getSession(session.uuid)
+  except NotFoundError:
+    return conn.addSession(session) 
 
 proc updateOrCreate*(conn: DbConn, user: User): User =
   result = conn.getOrInsert(user)
@@ -77,25 +147,55 @@ proc addMessage*(conn: DbConn, message: Message) =
   var message = message
   conn.insert message
 
-proc deleteMessages*(conn: DbConn, chatId: int64): int =
-  var messages = @[Message(sender: User(), chat: Chat())]
-  conn.select(messages, "chatId = ?", chatId)
+proc deleteMessages*(conn: DbConn, session: Session): int =
+  var messages = @[Message(sender: User(), session: Session(chat: Chat()))]
+  conn.select(messages, "uuid = ? AND chatId = ?", session.uuid, session.chat.chatId)
   result = len(messages)
   conn.delete(messages)
 
-proc getLatestMessages*(conn: DbConn, chatId: int64, count: int = 1500): seq[Message] =
-  result = @[Message(sender: User(), chat: Chat())]
-  conn.select(result, "chatId = ? ORDER BY messages.id DESC LIMIT ?", chatId, count)
+proc getLatestMessages*(conn: DbConn, session: Session, count: int = 1500): seq[Message] =
+  result = @[Message(sender: User(), session: Session(chat: Chat()))]
+  conn.select(result, "uuid = ? AND chatId = ? ORDER BY messages.id DESC LIMIT ?", session.uuid, session.chat.chatId, count)
+
+proc getSessionsCount*(conn: DbConn, chatId: int64): int64 =
+  let query = "SELECT COUNT(*) FROM sessions JOIN chats WHERE chatId = ?"
+  let params = @[
+    DbValue(kind: dvkInt, i: chatId)
+  ]
+  return get conn.getValue(int64, sql query, params)
+  # return conn.count(Session, "chatId = ?", chatId)
 
 proc getBotAdmins*(conn: DbConn): seq[User] =
   result = @[User()]
-  conn.select(result, "admin = true")
+  conn.select(result, "admin")
+
+proc getBannedUsers*(conn: DbConn): seq[User] =
+  result = @[User()]
+  conn.select(result, "banned")
 
 proc setAdmin*(conn: DbConn, userId: int64, admin: bool = true): User =
-  result = conn.updateOrCreate(User(userId: userId, admin: admin))
+  var user = conn.getOrInsert(User(userId: userId))
+  user.admin = admin
+  conn.update(user)
+  return user
+
+proc setBanned*(conn: DbConn, userId: int64, banned: bool = true): User =
+  var user = conn.getOrInsert(User(userId: userId))
+  user.banned = banned
+  conn.update(user)
+  return user
 
 proc setEnabled*(conn: DbConn, chatId: int64, enabled: bool = true): Chat =
-  result = conn.updateOrCreate(Chat(chatId: chatId, enabled: enabled))
+  var chat = conn.getOrInsert(Chat(chatId: chatId))
+  chat.enabled = enabled
+  conn.update(chat)
+  return chat
+
+proc setBanned*(conn: DbConn, chatId: int64, banned: bool = true): Chat =
+  var chat = conn.getOrInsert(Chat(chatId: chatId))
+  chat.banned = banned
+  conn.update(chat)
+  return chat
 
 proc getCount*(conn: DbConn, model: typedesc): int64 =
   return conn.count(model)
