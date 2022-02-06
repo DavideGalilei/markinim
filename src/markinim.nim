@@ -23,7 +23,7 @@ const
   MARKOV_DB = "markov.db"
 
   ANTIFLOOD_SECONDS = 10
-  ANTIFLOOD_RATE = 5
+  ANTIFLOOD_RATE = 6
 
   MARKOV_SAMPLES_CACHE_TIMEOUT = 60 * 30 # 30 minutes
   GROUP_ADMINS_CACHE_TIMEOUT = 60 * 5 # result is valid for five minutes
@@ -123,7 +123,8 @@ proc showSessions(bot: Telebot, chatId, messageId: int64, sessions: seq[Session]
     text = "*Current sessions in this chat.* Send /delete to delete the current one.",
     replyMarkup = newInlineKeyboardMarkup(
       sessions.mapIt(
-        @[InlineKeyboardButton(text: if it.isDefault: &"{it.name} 🎩" else: it.name, callbackData: some &"set_{chatId}_{it.uuid}")]
+        @[InlineKeyboardButton(text: (if it.isDefault: &"🎩 {it.name}" else: it.name) & &" - {conn.getMessagesCount(it)}",
+            callbackData: some &"set_{chatId}_{it.uuid}")]
       ) & @[InlineKeyboardButton(text: "Add session", callbackData: some &"addsession_{chatId}")]
     ),
     parseMode = "markdown",
@@ -240,10 +241,11 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
 
     let sessions = conn.getSessions(message.chat.id)
     discard await bot.sendMessage(message.chat.id,
-      "*Current sessions in this chat*",
+      "*Current sessions in this chat.* Send /delete to delete the current one.",
       replyMarkup = newInlineKeyboardMarkup(
         sessions.mapIt(
-          @[InlineKeyboardButton(text: if it.isDefault: &"{it.name} 🎩" else: it.name, callbackData: some &"set_{message.chat.id}_{it.uuid}")]
+          @[InlineKeyboardButton(text: (if it.isDefault: &"🎩 {it.name}" else: it.name) & &" - {conn.getMessagesCount(it)}",
+              callbackData: some &"set_{message.chat.id}_{it.uuid}")]
         ) & @[InlineKeyboardButton(text: "Add session", callbackData: some &"addsession_{message.chat.id}")]
       ),
       parseMode = "markdown",
@@ -374,15 +376,14 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
       discard await bot.answerCallbackQuery(callback.id, UNALLOWED, showAlert = true)
       return
 
-    try:
-      let default = conn.getCachedSession(chatId = chatId)
-      if default.uuid == uuid:
-        discard await bot.answerCallbackQuery(callback.id, "This is already the default session for this chat", showAlert = true)
-        return
-    except:
-      discard
+    let default = conn.getCachedSession(chatId = chatId)
+    if default.uuid == uuid:
+      discard await bot.answerCallbackQuery(callback.id, "This is already the default session for this chat", showAlert = true)
+      return
 
     let sessions = conn.setDefaultSession(chatId = chatId, uuid = uuid)
+    chatSessions[chatId] = (unixTime(), sessions.filterIt(it.isDefault)[0])
+
     await bot.showSessions(chatId = callback.message.get().chat.id,
       messageId = callback.message.get().messageId,
       sessions = sessions)
@@ -395,9 +396,10 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
       discard await bot.answerCallbackQuery(callback.id, UNALLOWED, showAlert = true)
       return
     discard await bot.answerCallbackQuery(callback.id)
-    
+
     let chat = conn.getChat(chatId = chatId)
     let sessionsCount = conn.getSessionsCount(chatId)
+
     if sessionsCount >= MAX_FREE_SESSIONS or sessionsCount >= MAX_SESSIONS and not chat.premium:
       let currentMax = if sessionsCount >= MAX_SESSIONS: MAX_SESSIONS else: MAX_FREE_SESSIONS
       discard await bot.editMessageText(chatId = $callback.message.get().chat.id,
@@ -436,8 +438,9 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
           parseMode = "markdown",
         )
         return
-
-      chatSessions[chatId] = (unixTime(), conn.addSession(Session(name: text, chat: conn.getChat(chatId))))
+      
+      discard conn.addSession(Session(name: text, chat: conn.getChat(chatId)))
+      # chatSessions[chatId] = (unixTime(), conn.addSession(Session(name: text, chat: conn.getChat(chatId))))
       await bot.showSessions(chatId = callback.message.get().chat.id, messageId = callback.message.get().messageId)
     except TimeoutError:
       discard await bot.deleteMessage(chatId = $callback.message.get().chat.id,
@@ -546,8 +549,9 @@ proc main {.async.} =
 
   asyncCheck cleanerWorker()
 
+  discard await bot.getUpdates(offset = -1)
   bot.onUpdate(updateHandler)
-  await bot.pollAsync(timeout = 200, clean = true)
+  await bot.pollAsync(timeout = 300, clean = true)
 
 when isMainModule:
   when defined(windows):

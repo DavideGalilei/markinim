@@ -157,6 +157,14 @@ proc getLatestMessages*(conn: DbConn, session: Session, count: int = 1500): seq[
   result = @[Message(sender: User(), session: Session(chat: Chat()))]
   conn.select(result, "uuid = ? AND chatId = ? ORDER BY messages.id DESC LIMIT ?", session.uuid, session.chat.chatId, count)
 
+proc getMessagesCount*(conn: DbConn, session: Session): int64 =
+  let query = "SELECT COUNT(*) FROM messages WHERE session = (SELECT id FROM sessions WHERE uuid = ? LIMIT 1)"
+  let params = @[
+    DbValue(kind: dvkString, s: session.uuid)
+  ]
+  return get conn.getValue(int64, sql query, params)
+  # return conn.count(Session, "chatId = ?", chatId)
+
 proc getSessionsCount*(conn: DbConn, chatId: int64): int64 =
   let query = "SELECT COUNT(*) FROM sessions JOIN chats WHERE chatId = ?"
   let params = @[
