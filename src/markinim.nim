@@ -546,8 +546,9 @@ proc main {.async.} =
 
   asyncCheck cleanerWorker()
 
+  discard await bot.getUpdates(offset = -1)
   bot.onUpdate(updateHandler)
-  await bot.pollAsync(timeout = 200, clean = true)
+  await bot.pollAsync(timeout = 300, clean = true)
 
 when isMainModule:
   when defined(windows):
