@@ -166,7 +166,7 @@ proc getMessagesCount*(conn: DbConn, session: Session): int64 =
   # return conn.count(Session, "chatId = ?", chatId)
 
 proc getSessionsCount*(conn: DbConn, chatId: int64): int64 =
-  let query = "SELECT COUNT(*) FROM sessions JOIN chats WHERE chatId = ?"
+  let query = "SELECT COUNT(*) FROM sessions WHERE chat = (SELECT id FROM chats WHERE chatId = ? LIMIT 1)"
   let params = @[
     DbValue(kind: dvkInt, i: chatId)
   ]
