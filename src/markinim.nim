@@ -333,7 +333,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
         if markovs.hasKey(message.chat.id):
           markovs.del(message.chat.id)
         
-        if conn.getSessionsCount(chatId = message.chat.id) < 2:
+        if conn.getSessionsCount(chatId = message.chat.id) > 1:
           conn.delete(defaultSession.dup)
           chatSessions[message.chat.id] = (unixTime(), conn.getCachedSession(chatId = message.chat.id))
 
