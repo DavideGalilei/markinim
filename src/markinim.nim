@@ -525,7 +525,7 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
   except Exception as error:
     let msg = getCurrentExceptionMsg()
     L.log(lvlError, &"{$typeof(error)}: " & msg)
-    raise error
+    # raise error
 
 
 proc main {.async.} =
