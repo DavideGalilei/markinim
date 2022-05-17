@@ -70,11 +70,25 @@ proc addSession*(conn: DbConn, session: Session): Session =
   conn.insert session
   return conn.getSession(session.uuid)
 
+proc getSessionsCount*(conn: DbConn, chatId: int64): int64 =
+  let query = "SELECT COUNT(*) FROM sessions WHERE chat = (SELECT id FROM chats WHERE chatId = ? LIMIT 1)"
+  let params = @[
+    DbValue(kind: dvkInt, i: chatId)
+  ]
+  return get conn.getValue(int64, sql query, params)
+  # return conn.count(Session, "chatId = ?", chatId)
+
 proc getDefaultSession*(conn: DbConn, chatId: int64): Session =
   result = Session(chat: Chat())
   try:
     conn.select(result, "chat.chatId = ? AND isDefault", chatId)
   except NotFoundError:
+    if conn.getSessionsCount(chatId) > 0:
+      conn.select(result, "chat.chatId = ?", chatId)
+      result.isDefault = true
+      conn.update(result)
+      return
+
     return conn.addSession(Session(
       name: "default",
       uuid: $genOid(),
@@ -147,12 +161,6 @@ proc addMessage*(conn: DbConn, message: Message) =
   var message = message
   conn.insert message
 
-proc deleteMessages*(conn: DbConn, session: Session): int =
-  var messages = @[Message(sender: User(), session: Session(chat: Chat()))]
-  conn.select(messages, "uuid = ? AND chatId = ?", session.uuid, session.chat.chatId)
-  result = len(messages)
-  conn.delete(messages)
-
 proc getLatestMessages*(conn: DbConn, session: Session, count: int = 1500): seq[Message] =
   result = @[Message(sender: User(), session: Session(chat: Chat()))]
   conn.select(result, "uuid = ? AND chatId = ? ORDER BY messages.id DESC LIMIT ?", session.uuid, session.chat.chatId, count)
@@ -165,13 +173,16 @@ proc getMessagesCount*(conn: DbConn, session: Session): int64 =
   return get conn.getValue(int64, sql query, params)
   # return conn.count(Session, "chatId = ?", chatId)
 
-proc getSessionsCount*(conn: DbConn, chatId: int64): int64 =
-  let query = "SELECT COUNT(*) FROM sessions WHERE chat = (SELECT id FROM chats WHERE chatId = ? LIMIT 1)"
-  let params = @[
-    DbValue(kind: dvkInt, i: chatId)
+proc deleteMessages*(conn: DbConn, session: Session): int64 =
+  result = conn.getMessagesCount(session)
+  var query = "DELETE FROM sessions WHERE uuid = ? AND chat = (SELECT id FROM chats WHERE chatId = ?)"
+  var params = @[
+    DbValue(kind: dvkString, s: session.uuid),
+    DbValue(kind: dvkInt, i: session.chat.chatId),
   ]
-  return get conn.getValue(int64, sql query, params)
-  # return conn.count(Session, "chatId = ?", chatId)
+  echo conn.getMessagesCount(session)
+  conn.exec(sql query, params)
+  conn.exec(sql "DELETE FROM messages WHERE session = ?", DbValue(kind: dvkInt, i: session.id))
 
 proc getBotAdmins*(conn: DbConn): seq[User] =
   result = @[User()]

@@ -117,6 +117,8 @@ proc showSessions(bot: Telebot, chatId, messageId: int64, sessions: seq[Session]
   var sessions = sessions
   if sessions.len == 0:
     sessions = conn.getSessions(chatId = chatId)
+  # if checkDefault:
+  #   discard conn.getDefaultSession(chatId)
 
   discard await bot.editMessageText(chatId = $chatId,
     messageId = int(messageId),
@@ -191,6 +193,8 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       &"*Chats*: `{conn.getCount(database.Chat)}`\n" &
       &"*Messages*: `{conn.getCount(database.Message)}`\n" &
       &"*Sessions*: `{conn.getCount(database.Session)}`\n" &
+      &"*Cached sessions*: `{len(chatSessions)}`\n" &
+      &"*Cached markovs*: `{len(markovs)}`\n" &
       &"*Uptime*: `{toInt(epochTime() - uptime)}`s",
       parseMode = "markdown")
   of "banpeer", "unbanpeer":
@@ -239,6 +243,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       discard await bot.sendMessage(message.chat.id, UNALLOWED)
       return
 
+    discard conn.getDefaultSession(message.chat.id)
     let sessions = conn.getSessions(message.chat.id)
     discard await bot.sendMessage(message.chat.id,
       "*Current sessions in this chat.* Send /delete to delete the current one.",
@@ -322,9 +327,8 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
     elif message.chat.id in deleting:
       discard await bot.sendMessage(message.chat.id, "I am already deleting the messages from my database. Please hold on")
     elif len(args) > 0 and args[0].toLower() == "confirm":
-      deleting.incl(message.chat.id)
-      defer: deleting.excl(message.chat.id)
       try:
+        deleting.incl(message.chat.id)
         let 
           sentMessage = await bot.sendMessage(message.chat.id, "I am deleting data for this session...")
           defaultSession = conn.getCachedSession(message.chat.id)
@@ -333,6 +337,9 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
         if markovs.hasKey(message.chat.id):
           markovs.del(message.chat.id)
         
+        if chatSessions.hasKey(message.chat.id):
+          chatSessions.del(message.chat.id)
+
         if conn.getSessionsCount(chatId = message.chat.id) > 1:
           conn.delete(defaultSession.dup)
           chatSessions[message.chat.id] = (unixTime(), conn.getCachedSession(chatId = message.chat.id))
@@ -343,8 +350,10 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
         )
         return
       except Exception as error:
-        discard await bot.sendMessage(message.chat.id, text = "An error occurred. Operation has been aborted.", replyToMessageId = message.messageId)
+        discard await bot.sendMessage(message.chat.id, text = "An error occurred. Operation has been aborted. Please contact my creator (more information on @Markinim)", replyToMessageId = message.messageId)
         raise error
+      finally:
+        deleting.excl(message.chat.id)
     else:
       discard await bot.sendMessage(message.chat.id,
         "If you are sure to delete data in this chat (of the current session), send `/delete confirm`. *NOTE*: This cannot be reverted",
@@ -381,12 +390,16 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
       discard await bot.answerCallbackQuery(callback.id, "This is already the default session for this chat", showAlert = true)
       return
 
-    let
-      sessions = conn.setDefaultSession(chatId = chatId, uuid = uuid)
-      newSession = sessions.filterIt(it.isDefault)[0]
-    chatSessions[chatId] = (unixTime(), newSession)
+    let sessions = conn.setDefaultSession(chatId = chatId, uuid = uuid)
+    var newSession = sessions.filterIt(it.isDefault)
 
-    markovs[chatId] = (unixTime(), newMarkov(conn.getLatestMessages(session = newSession).mapIt(it.text)))
+    if newSession.len < 1:
+      let defaultSession = conn.getDefaultSession(chatId)
+      newSession.add(defaultSession)
+
+    chatSessions[chatId] = (unixTime(), newSession[0])
+
+    markovs[chatId] = (unixTime(), newMarkov(conn.getLatestMessages(session = newSession[0]).mapIt(it.text)))
 
     await bot.showSessions(chatId = callback.message.get().chat.id,
       messageId = callback.message.get().messageId,
@@ -509,22 +522,25 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
       let user = conn.getOrInsert(database.User(userId: msgUser.id))
       conn.addMessage(database.Message(text: text, sender: user, session: conn.getCachedSession(chat.chatId)))
 
-      if rand(0 .. 100) <= chat.percentage and not isFlood(chatId, rate = 10, seconds = 60): # Max 10 messages per chat per minute
+      var percentage = chat.percentage
+      let replyMessage = update.message.get().replyToMessage
+      if replyMessage.isSome() and replyMessage.get().fromUser.isSome and replyMessage.get().fromUser.get().id == bot.id:
+        percentage *= 2
+
+      if rand(0 .. 100) <= percentage and not isFlood(chatId, rate = 10, seconds = 30): # Max 10 messages per chat per half minute
         let generated = markovs.get(chatId).generate()
         if generated.isSome:
           discard await bot.sendMessage(chatId, generated.get())
-  except IOError:
-    if "Bad Request: have no rights to send a message" in getCurrentExceptionMsg():
+  except IOError as error:
+    if "Bad Request: have no rights to send a message" in error.msg:
       try:
         if update.message.isSome():
           let chatId = update.message.get().chat.id
           discard await bot.leaveChat(chatId = $chatId)
       except: discard
-    let msg = getCurrentExceptionMsg()
-    L.log(lvlError, &"{$typeof(error)}: " & msg)
+    echo &"[ERROR] | " & $typeof(error) & ": " & error.msg & ";"
   except Exception as error:
-    let msg = getCurrentExceptionMsg()
-    L.log(lvlError, &"{$typeof(error)}: " & msg)
+    echo &"[ERROR] | " & $typeof(error) & ": " & error.msg & ";"
     # raise error
 
 
@@ -549,7 +565,7 @@ proc main {.async.} =
     banned.incl(bannedUser.userId)
 
   let bot = newTeleBot(botToken)
-  botUsername = (await bot.getMe()).username.get().toLower()
+  botUsername = bot.username # (await bot.getMe()).username.get().toLower()
 
   asyncCheck cleanerWorker()
 
