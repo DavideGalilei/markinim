@@ -24,11 +24,16 @@ type
     #    https://www.surgehq.ai/blog/the-obscenity-list-surge
     # -> https://www.kaggle.com/nicapotato/bad-bad-words
 
+    markovDisabled*: bool
+
   Session* {.tableName: "sessions".} = ref object of Model
     name*: string
     uuid* {.unique.}: string
     chat* {.onDelete: "CASCADE".}: Chat
     isDefault*: bool
+
+    owoify*: int
+    emojipasta*: bool
 
   Message* {.tableName: "messages".} = ref object of Model
     session* {.onDelete: "CASCADE".}: Session
@@ -42,6 +47,13 @@ proc initDatabase*(name: string = "markov.db"): DbConn =
   result.createTables(Chat())
   result.createTables(Session(chat: Chat()))
   result.createTables(Message(sender: User(), session: Session(chat: Chat())))
+  result.exec(sql"""
+    BEGIN TRANSACTION;
+    ALTER TABLE sessions ADD owoify INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE sessions ADD emojipasta INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE chats ADD markovDisabled INTEGER NOT NULL DEFAULT 0;
+    COMMIT;
+  """)
 
 proc getUser*(conn: DbConn, userId: int64): User =
   new result
@@ -78,6 +90,8 @@ proc getSessionsCount*(conn: DbConn, chatId: int64): int64 =
   return get conn.getValue(int64, sql query, params)
   # return conn.count(Session, "chatId = ?", chatId)
 
+proc getOrInsert*(conn: DbConn, chat: Chat, doNotCreateSession: bool = false): Chat
+
 proc getDefaultSession*(conn: DbConn, chatId: int64): Session =
   result = Session(chat: Chat())
   try:
@@ -92,7 +106,7 @@ proc getDefaultSession*(conn: DbConn, chatId: int64): Session =
     return conn.addSession(Session(
       name: "default",
       uuid: $genOid(),
-      chat: conn.getChat(chatId),
+      chat: conn.getOrInsert(chat = Chat(chatId: chatId), doNotCreateSession = true),
       isDefault: true,
     ))
 
@@ -108,22 +122,23 @@ proc setDefaultSession*(conn: DbConn, chatId: int64, uuid: string): seq[Session]
     result.add(session)
 
 const DEFAULT_TRIGGER_PERCENTAGE = 30#%
-proc addChat*(conn: DbConn, chat: Chat): Chat =
+proc addChat*(conn: DbConn, chat: Chat, doNotCreateSession: bool = false): Chat =
   var chat = chat
   if chat.percentage == 0:
     chat.percentage = if chat.chatId < 0: DEFAULT_TRIGGER_PERCENTAGE
       else: 100
-  chat.enabled = chat.chatId > 0
+  chat.enabled = true # chat.chatId > 0
   conn.insert chat
 
   result = conn.getChat(chat.chatId)
   
-  discard conn.addSession(Session(
-    name: "default",
-    uuid: $genOid(),
-    chat: result,
-    isDefault: true,
-  ))
+  if not doNotCreateSession:
+    discard conn.addSession(Session(
+      name: "default",
+      uuid: $genOid(),
+      chat: result,
+      isDefault: true,
+    ))
 
 proc getOrInsert*(conn: DbConn, user: User): User =
   try:
@@ -131,11 +146,11 @@ proc getOrInsert*(conn: DbConn, user: User): User =
   except NotFoundError:
     return conn.addUser(user) 
 
-proc getOrInsert*(conn: DbConn, chat: Chat): Chat =
+proc getOrInsert*(conn: DbConn, chat: Chat, doNotCreateSession: bool = false): Chat =
   try:
     return conn.getChat(chat.chatId)
   except NotFoundError:
-    return conn.addChat(chat) 
+    return conn.addChat(chat, doNotCreateSession = doNotCreateSession) 
 
 proc getOrInsert*(conn: DbConn, session: Session): Session =
   try:
