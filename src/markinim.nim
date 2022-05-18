@@ -34,6 +34,7 @@ const
   MAX_SESSION_NAME_LENGTH = 16
 
   UNALLOWED = "You are not allowed to perform this command"
+  CREATOR_STRING = " Please contact my creator if you think this is a mistake (more information on @Markinim)"
 
 template get(self: Table[int64, (int64, MarkovGenerator)], chatId: int64): MarkovGenerator =
   self[chatId][1]
@@ -350,13 +351,66 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
         )
         return
       except Exception as error:
-        discard await bot.sendMessage(message.chat.id, text = "An error occurred. Operation has been aborted. Please contact my creator (more information on @Markinim)", replyToMessageId = message.messageId)
+        discard await bot.sendMessage(message.chat.id, text = "An error occurred. Operation has been aborted." & CREATOR_STRING, replyToMessageId = message.messageId)
         raise error
       finally:
         deleting.excl(message.chat.id)
     else:
       discard await bot.sendMessage(message.chat.id,
         "If you are sure to delete data in this chat (of the current session), send `/delete confirm`. *NOTE*: This cannot be reverted",
+        parseMode = "markdown")
+  of "deletefrom", "delfrom", "delete_from", "del_from":
+    # deleteFromUserInChat
+    if message.chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = message.chat.id, userId = senderId):
+      discard await bot.sendMessage(message.chat.id, UNALLOWED)
+      return
+    elif len(args) > 0 or message.replyToMessage.isSome():
+      try:
+        var userId: int64
+        try:
+          userId = if len(args) > 0:
+              parseBiggestInt(args[0])
+            elif message.replyToMessage.get().fromUser.isSome():
+              message.replyToMessage.get().fromUser.get().id
+            elif message.replyToMessage.get().senderChat.isSome():
+              message.replyToMessage.get().senderChat.get().id
+            else:
+              discard await bot.sendMessage(chatId = message.chat.id,
+                text = &"Operation failed. No user has been found. {CREATOR_STRING}",
+              )
+              return
+        except ValueError:
+          discard await bot.sendMessage(chatId = message.chat.id,
+            text = "Operation failed. Invalid integer (usernames are not allowed).",
+          )
+          return
+
+        let defaultSession = conn.getCachedSession(message.chat.id)
+
+        if conn.getUserMessagesCount(defaultSession, userId) < 1:
+          discard await bot.sendMessage(chatId = message.chat.id,
+            text = &"There are 0 messages belonging to the specified user in this chat session. ",
+          )
+          return
+
+        let 
+          sentMessage = await bot.sendMessage(message.chat.id, "I am deleting data from the specified user for this session...")
+          deleted = conn.deleteFromUserInChat(session = defaultSession, userId = userId)
+
+        if markovs.hasKey(message.chat.id):
+          markovs.del(message.chat.id)
+
+        discard await bot.editMessageText(chatId = $message.chat.id, messageId = sentMessage.messageId,
+          text = &"Operation completed. Successfully deleted `{deleted}` messages sent by the specified user from my database!",
+          parseMode = "markdown"
+        )
+        return
+      except Exception as error:
+        discard await bot.sendMessage(message.chat.id, text = "An error occurred (does the user exist?). Operation has been aborted." & CREATOR_STRING, replyToMessageId = message.messageId)
+        raise error
+    else:
+      discard await bot.sendMessage(message.chat.id,
+        "Send `/delfrom user_id` or use it in reply to someone. It will delete all messages a user sent from the bot's database. *NOTE*: This cannot be reverted",
         parseMode = "markdown")
 
 

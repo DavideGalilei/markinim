@@ -173,16 +173,33 @@ proc getMessagesCount*(conn: DbConn, session: Session): int64 =
   return get conn.getValue(int64, sql query, params)
   # return conn.count(Session, "chatId = ?", chatId)
 
+proc getUserMessagesCount*(conn: DbConn, session: Session, userId: int64): int64 =
+  let query = "SELECT COUNT(*) FROM messages WHERE session = (SELECT id FROM sessions WHERE uuid = ? LIMIT 1) AND sender = (SELECT id FROM users WHERE userId = ?)"
+  let params = @[
+    DbValue(kind: dvkString, s: session.uuid),
+    DbValue(kind: dvkInt, i: userId),
+  ]
+  return get conn.getValue(int64, sql query, params)
+  # return conn.count(Session, "chatId = ?", chatId)
+
 proc deleteMessages*(conn: DbConn, session: Session): int64 =
   result = conn.getMessagesCount(session)
-  var query = "DELETE FROM sessions WHERE uuid = ? AND chat = (SELECT id FROM chats WHERE chatId = ?)"
+  var query = "DELETE FROM sessions WHERE uuid = ? AND chat = (SELECT id FROM chats WHERE chatId = ? LIMIT 1)"
   var params = @[
     DbValue(kind: dvkString, s: session.uuid),
     DbValue(kind: dvkInt, i: session.chat.chatId),
   ]
-  echo conn.getMessagesCount(session)
   conn.exec(sql query, params)
   conn.exec(sql "DELETE FROM messages WHERE session = ?", DbValue(kind: dvkInt, i: session.id))
+
+proc deleteFromUserInChat*(conn: DbConn, session: Session, userId: int64): int64 =
+  result = conn.getUserMessagesCount(session, userId = userId)
+  var query = "DELETE FROM messages WHERE session = (SELECT id FROM sessions WHERE uuid = ? LIMIT 1) AND sender = (SELECT id FROM users WHERE userId = ? LIMIT 1)"
+  var params = @[
+    DbValue(kind: dvkString, s: session.uuid),
+    DbValue(kind: dvkInt, i: userId),
+  ]
+  conn.exec(sql query, params)
 
 proc getBotAdmins*(conn: DbConn): seq[User] =
   result = @[User()]
