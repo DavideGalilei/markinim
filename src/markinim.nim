@@ -2,7 +2,7 @@ import std/[asyncdispatch, logging, options, os, times, strutils, strformat, tab
 import telebot, norm / [model, sqlite], nimkov / generator
 
 import ./database
-import ./utils/[unixtime, timeout, listen]
+import ./utils/[unixtime, timeout, listen, as_emoji]
 
 var L = newConsoleLogger(fmtStr="$levelname | [$time] ")
 addHandler(L)
@@ -131,6 +131,23 @@ proc showSessions(bot: Telebot, chatId, messageId: int64, sessions: seq[Session]
       ) & @[InlineKeyboardButton(text: "Add session", callbackData: some &"addsession_{chatId}")]
     ),
     parseMode = "markdown",
+  )
+
+proc getSettingsKeyboard(session: Session): InlineKeyboardMarkup =
+  let chatId = session.chat.chatId
+  return newInlineKeyboardMarkup(
+    @[
+      InlineKeyboardButton(text: &"Usernames {asEmoji(session.chat.blockUsernames)}", callbackData: some &"usernames_{chatId}_{session.chat.blockUsernames}"),
+      InlineKeyboardButton(text: &"Links {asEmoji(session.chat.blockLinks)}", callbackData: some &"links_{chatId}_{session.chat.blockUsernames}"),
+    ]
+    #[
+      TODO:
+      keepSfw,
+      markovDisabled,
+      owoify,
+      emojipasta,
+      ...
+    ]#
   )
 
 proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[string]) {.async.} =
@@ -314,7 +331,17 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
     discard await bot.sendDocument(senderId, "file://" & (tmp / MARKOV_DB))
     discard tryRemoveFile(tmp / MARKOV_DB)
   of "settings":
-    discard
+    if message.chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = message.chat.id, userId = senderId):
+      discard await bot.sendMessage(message.chat.id, UNALLOWED)
+      return
+
+    let session = conn.getCachedSession(message.chat.id)
+    discard await bot.sendMessage(message.chat.id,
+      "Tap on a button to toggle an option. Use /percentage to change the ratio of answers from the bot.",
+      replyMarkup = getSettingsKeyboard(session),
+      parseMode = "markdown",
+    )
+    return
   of "distort":
     discard
   of "hazmat":
@@ -361,7 +388,10 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
         parseMode = "markdown")
   of "deletefrom", "delfrom", "delete_from", "del_from":
     # deleteFromUserInChat
-    if message.chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = message.chat.id, userId = senderId):
+    if not message.chat.kind.endswith("group"):
+      discard await bot.sendMessage(message.chat.id, "This command works only in groups")
+      return
+    if not await bot.isAdminInGroup(chatId = message.chat.id, userId = senderId):
       discard await bot.sendMessage(message.chat.id, UNALLOWED)
       return
     elif len(args) > 0 or message.replyToMessage.isSome():
@@ -517,6 +547,8 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
       discard await bot.deleteMessage(chatId = $callback.message.get().chat.id,
         messageId = callback.message.get().messageId,
       )
+  of "blockusernames":
+    discard "TODO ... (getSettingsKeyboard)"
 
 proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.} =
   if await listenUpdater(bot, update):
