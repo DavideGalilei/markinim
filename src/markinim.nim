@@ -523,7 +523,13 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
           parseMode = "markdown",
         )
 
-      case command:
+      template adminCheck =
+        let chatId = callback.message.get().chat.id
+        if callback.message.get().chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = chatId, userId = userId):
+          discard await bot.answerCallbackQuery(callback.id, UNALLOWED, showAlert = true)
+          return
+
+      case command: 
       of "set":
         if len(args) < 2:
           discard await bot.answerCallbackQuery(callback.id, "Error: try again with a new message", showAlert = true)
@@ -533,9 +539,7 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
           chatId = parseBiggestInt(args[0])
           uuid = args[1]
 
-        if callback.message.get().chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = chatId, userId = userId):
-          discard await bot.answerCallbackQuery(callback.id, UNALLOWED, showAlert = true)
-          break callbackBlock
+        adminCheck()
 
         let default = conn.getCachedSession(chatId = chatId)
         if default.uuid == uuid:
@@ -559,11 +563,9 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
 
         discard await bot.answerCallbackQuery(callback.id, "Done", showAlert = true)
       of "addsession":
+        adminCheck()
         let chatId = parseBiggestInt(args[0])
 
-        if callback.message.get().chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = chatId, userId = userId):
-          discard await bot.answerCallbackQuery(callback.id, UNALLOWED, showAlert = true)
-          break callbackBlock
         discard await bot.answerCallbackQuery(callback.id)
 
         let chat = conn.getChat(chatId = chatId)
@@ -627,26 +629,31 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
         discard await bot.answerCallbackQuery(callback.id, "This button serves no purpose! ☔️", showAlert = true)
         return
       of "usernames":
+        adminCheck()
         var session = conn.getCachedSession(parseBiggestInt(args[0]))
         session.chat.blockUsernames = not session.chat.blockUsernames
         conn.update(session.chat)
         editSettings()
       of "links":
+        adminCheck()
         var session = conn.getCachedSession(parseBiggestInt(args[0]))
         session.chat.blockLinks = not session.chat.blockLinks
         conn.update(session.chat)
         editSettings()
       of "markov":
+        adminCheck()
         var session = conn.getCachedSession(parseBiggestInt(args[0]))
         session.chat.markovDisabled = not session.chat.markovDisabled
         conn.update(session.chat)
         editSettings()
       of "casesensivity":
+        adminCheck()
         var session = conn.getCachedSession(parseBiggestInt(args[0]))
         session.caseSensitive = not session.caseSensitive
         conn.update(session)
         editSettings()
       of "sfw":
+        adminCheck()
         var session = conn.getCachedSession(parseBiggestInt(args[0]))
         session.chat.keepSfw = not session.chat.keepSfw
         conn.update(session.chat)
@@ -654,6 +661,7 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
         
         return
       of "owoify":
+        adminCheck()
         var session = conn.getCachedSession(parseBiggestInt(args[0]))
         session.owoify = (session.owoify + 1) mod 4
         conn.update(session)
@@ -665,6 +673,7 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
         )
         return
       of "emojipasta":
+        adminCheck()
         var session = conn.getCachedSession(parseBiggestInt(args[0]))
         session.emojipasta = not session.emojipasta
         conn.update(session)
