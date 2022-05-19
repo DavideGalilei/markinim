@@ -34,11 +34,17 @@ type
 
     owoify*: int
     emojipasta*: bool
+    caseSensitive*: bool
 
   Message* {.tableName: "messages".} = ref object of Model
     session* {.onDelete: "CASCADE".}: Session
     sender*: User
     text*: string
+
+
+template inTransaction(conn: DbConn, query: string) =
+  conn.transaction:
+    discard conn.tryExec(sql(query))
 
 
 proc initDatabase*(name: string = "markov.db"): DbConn =
@@ -47,13 +53,10 @@ proc initDatabase*(name: string = "markov.db"): DbConn =
   result.createTables(Chat())
   result.createTables(Session(chat: Chat()))
   result.createTables(Message(sender: User(), session: Session(chat: Chat())))
-  result.exec(sql"""
-    BEGIN TRANSACTION;
-    ALTER TABLE sessions ADD owoify INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE sessions ADD emojipasta INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE chats ADD markovDisabled INTEGER NOT NULL DEFAULT 0;
-    COMMIT;
-  """)
+  result.inTransaction"ALTER TABLE sessions ADD owoify INTEGER NOT NULL DEFAULT 0"
+  result.inTransaction"ALTER TABLE sessions ADD emojipasta INTEGER NOT NULL DEFAULT 0"
+  result.inTransaction"ALTER TABLE sessions ADD caseSensitive INTEGER NOT NULL DEFAULT 0"
+  result.inTransaction"ALTER TABLE chats ADD markovDisabled INTEGER NOT NULL DEFAULT 0"
 
 proc getUser*(conn: DbConn, userId: int64): User =
   new result

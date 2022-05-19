@@ -1,8 +1,10 @@
-import std/[asyncdispatch, logging, options, os, times, strutils, strformat, tables, random, sets, parsecfg, sequtils, streams, sugar]
-import telebot, norm / [model, sqlite], nimkov / generator
+import std/[asyncdispatch, logging, options, os, times, strutils, strformat, tables, random, sets, parsecfg, sequtils, streams, sugar, re]
+import pkg / norm / [model, sqlite]
+import pkg / [telebot, owoifynim, emojipasta]
+import pkg / nimkov / generator
 
 import ./database
-import ./utils/[unixtime, timeout, listen, as_emoji]
+import ./utils/[unixtime, timeout, listen, as_emoji, get_owoify_level]
 
 var L = newConsoleLogger(fmtStr="$levelname | [$time] ")
 addHandler(L)
@@ -35,6 +37,15 @@ const
 
   UNALLOWED = "You are not allowed to perform this command"
   CREATOR_STRING = " Please contact my creator if you think this is a mistake (more information on @Markinim)"
+  SETTINGS_TEXT = "Tap on a button to toggle an option. Use /percentage to change the ratio of answers from the bot."
+
+
+let SfwRegex = re(
+  (block:
+    const words = staticRead(currentSourcePath() / "../premium/bad-words.csv").strip(chars = {' ', '\n', '\r'})
+    words.split("\n").join("|")),
+  flags = {reIgnoreCase, reStudy},
+)
 
 template get(self: Table[int64, (int64, MarkovGenerator)], chatId: int64): MarkovGenerator =
   self[chatId][1]
@@ -59,6 +70,13 @@ proc getCachedSession*(conn: DbConn, chatId: int64): database.Session =
 
   result = conn.getDefaultSession(chatId)
   chatSessions[chatId] = (unixTime(), result)
+
+proc refillMarkov(conn: DbConn, session: Session) =
+  for message in conn.getLatestMessages(session = session):
+    if message.text.strip() != "":
+      if session.chat.keepSfw and message.text.find(SfwRegex) != -1:
+        continue
+      markovs.get(session.chat.chatId).addSample(message.text, asLower = not session.caseSensitive)
 
 proc cleanerWorker {.async.} =
   while true:
@@ -137,12 +155,27 @@ proc getSettingsKeyboard(session: Session): InlineKeyboardMarkup =
   let chatId = session.chat.chatId
   return newInlineKeyboardMarkup(
     @[
-      InlineKeyboardButton(text: &"Usernames {asEmoji(session.chat.blockUsernames)}", callbackData: some &"usernames_{chatId}_{session.chat.blockUsernames}"),
-      InlineKeyboardButton(text: &"Links {asEmoji(session.chat.blockLinks)}", callbackData: some &"links_{chatId}_{session.chat.blockUsernames}"),
-    ]
+      InlineKeyboardButton(text: &"Usernames {asEmoji(session.chat.blockUsernames)}", callbackData: some &"usernames_{chatId}"),
+      InlineKeyboardButton(text: &"Links {asEmoji(session.chat.blockLinks)}", callbackData: some &"links_{chatId}"),
+    ],
+    @[
+      InlineKeyboardButton(text: &"Keep SFW {asEmoji(session.chat.keepSfw)}", callbackData: some &"sfw_{chatId}")
+    ],
+    @[
+      InlineKeyboardButton(text: &"Disable /markov {asEmoji(session.chat.markovDisabled)}", callbackData: some &"markov_{chatId}"),
+    ],
+    @[
+      InlineKeyboardButton(text: "Session Bound:", callbackData: some"nothing"),
+    ],
+    @[
+      InlineKeyboardButton(text: &"Emojipasta {asEmoji(session.emojipasta)}", callbackData: some &"emojipasta_{chatId}_{session.uuid}"),
+      InlineKeyboardButton(text: &"Owoify {asEmoji(session.owoify)}", callbackData: some &"owoify_{chatId}_{session.uuid}"),
+    ],
+    @[
+      InlineKeyboardButton(text: &"[BETA] Case sensitive {asEmoji(session.caseSensitive)}", callbackData: some &"casesensivity_{chatId}_{session.uuid}"),
+    ],
     #[
       TODO:
-      keepSfw,
       markovDisabled,
       owoify,
       emojipasta,
@@ -307,19 +340,27 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       discard bot.sendMessage(message.chat.id, "Learning is not enabled in this chat. Enable it with /enable (for groups: admins only)")
       return
 
+    let cachedSession = conn.getCachedSession(message.chat.id)
+
+    if cachedSession.chat.markovDisabled:
+      return
+
     if not markovs.hasKey(message.chat.id):
       markovs[message.chat.id] = (unixTime(), newMarkov(@[]))
-      for dbMessage in conn.getLatestMessages(session = conn.getCachedSession(message.chat.id)):
-        if dbMessage.text != "":
-          markovs.get(message.chat.id).addSample(dbMessage.text)
+      conn.refillMarkov(cachedSession)
 
-    if len(markovs.get(message.chat.id).getSamples()) == 0:
+    if len(markovs.get(message.chat.id).samples) == 0:
       discard await bot.sendMessage(message.chat.id, "Not enough data to generate a sentence")
       return
 
     let generated = markovs.get(message.chat.id).generate()
     if generated.isSome:
-      discard await bot.sendMessage(message.chat.id, generated.get())
+      var text = generated.get()
+      if cachedSession.owoify != 0:
+        text = text.owoify(getOwoifyLevel(cachedSession.owoify))
+      if cachedSession.emojipasta:
+        text = emojify(text)
+      discard await bot.sendMessage(message.chat.id, text)
     else:
       discard await bot.sendMessage(message.chat.id, "Not enough data to generate a sentence")
   of "export":
@@ -337,7 +378,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
 
     let session = conn.getCachedSession(message.chat.id)
     discard await bot.sendMessage(message.chat.id,
-      "Tap on a button to toggle an option. Use /percentage to change the ratio of answers from the bot.",
+      SETTINGS_TEXT,
       replyMarkup = getSettingsKeyboard(session),
       parseMode = "markdown",
     )
@@ -455,100 +496,163 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
     command = splitted[0]
     args = splitted[1 .. ^1]
   
-  case command:
-  of "set":
-    if len(args) < 2:
-      discard await bot.answerCallbackQuery(callback.id, "Error: try again with a new message", showAlert = true)
-      return
-
-    let
-      chatId = parseBiggestInt(args[0])
-      uuid = args[1]
-
-    if callback.message.get().chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = chatId, userId = userId):
-      discard await bot.answerCallbackQuery(callback.id, UNALLOWED, showAlert = true)
-      return
-
-    let default = conn.getCachedSession(chatId = chatId)
-    if default.uuid == uuid:
-      discard await bot.answerCallbackQuery(callback.id, "This is already the default session for this chat", showAlert = true)
-      return
-
-    let sessions = conn.setDefaultSession(chatId = chatId, uuid = uuid)
-    var newSession = sessions.filterIt(it.isDefault)
-
-    if newSession.len < 1:
-      let defaultSession = conn.getDefaultSession(chatId)
-      newSession.add(defaultSession)
-
-    chatSessions[chatId] = (unixTime(), newSession[0])
-
-    markovs[chatId] = (unixTime(), newMarkov(conn.getLatestMessages(session = newSession[0]).mapIt(it.text)))
-
-    await bot.showSessions(chatId = callback.message.get().chat.id,
-      messageId = callback.message.get().messageId,
-      sessions = sessions)
-
-    discard await bot.answerCallbackQuery(callback.id, "Done", showAlert = true)
-  of "addsession":
-    let chatId = parseBiggestInt(args[0])
-
-    if callback.message.get().chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = chatId, userId = userId):
-      discard await bot.answerCallbackQuery(callback.id, UNALLOWED, showAlert = true)
-      return
-    discard await bot.answerCallbackQuery(callback.id)
-
-    let chat = conn.getChat(chatId = chatId)
-    let sessionsCount = conn.getSessionsCount(chatId)
-
-    if sessionsCount >= MAX_FREE_SESSIONS or sessionsCount >= MAX_SESSIONS and not chat.premium:
-      let currentMax = if sessionsCount >= MAX_SESSIONS: MAX_SESSIONS else: MAX_FREE_SESSIONS
-      discard await bot.editMessageText(chatId = $callback.message.get().chat.id,
-        messageId = callback.message.get().messageId,
-        text = &"You cannot add more than {currentMax} sessions per chat.",
-      )
-      return
-
-    discard await bot.editMessageText(chatId = $callback.message.get().chat.id,
-      messageId = callback.message.get().messageId,
-      text = "*Send me the name for the new session.* Send /cancel to cancel the current operation.",
-      parseMode = "markdown",
-    )
-
-    try:
-      var message = (await getMessage(userId = userId, chatId = chatId)).message.get()
-      while not message.text.isSome or message.caption.isSome:
-        message = (await getMessage(userId = userId, chatId = chatId)).message.get()
-      let text = if message.text.isSome: message.text.get else: message.caption.get()
-
-      if text.toLower().startswith("/cancel"):
+  try:
+    block callbackBlock:
+      template editSettings =
         discard await bot.editMessageText(chatId = $callback.message.get().chat.id,
           messageId = callback.message.get().messageId,
-          text = "*Operation cancelled...*",
+          text = SETTINGS_TEXT,
+          replyMarkup = getSettingsKeyboard(session),
           parseMode = "markdown",
         )
-        await sleepAsync(3 * 1000)
-        discard await bot.deleteMessage(chatId = $callback.message.get().chat.id,
+
+      case command:
+      of "set":
+        if len(args) < 2:
+          discard await bot.answerCallbackQuery(callback.id, "Error: try again with a new message", showAlert = true)
+          break callbackBlock
+
+        let
+          chatId = parseBiggestInt(args[0])
+          uuid = args[1]
+
+        if callback.message.get().chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = chatId, userId = userId):
+          discard await bot.answerCallbackQuery(callback.id, UNALLOWED, showAlert = true)
+          break callbackBlock
+
+        let default = conn.getCachedSession(chatId = chatId)
+        if default.uuid == uuid:
+          discard await bot.answerCallbackQuery(callback.id, "This is already the default session for this chat", showAlert = true)
+          break callbackBlock
+
+        let sessions = conn.setDefaultSession(chatId = chatId, uuid = uuid)
+        var newSession = sessions.filterIt(it.isDefault)
+
+        if newSession.len < 1:
+          let defaultSession = conn.getDefaultSession(chatId)
+          newSession.add(defaultSession)
+
+        chatSessions[chatId] = (unixTime(), newSession[0])
+
+        markovs[chatId] = (unixTime(), newMarkov(conn.getLatestMessages(session = newSession[0]).mapIt(it.text), asLower = not newSession[0].caseSensitive))
+
+        await bot.showSessions(chatId = callback.message.get().chat.id,
           messageId = callback.message.get().messageId,
-        )
-        return
-      elif text.len > MAX_SESSION_NAME_LENGTH:
+          sessions = sessions)
+
+        discard await bot.answerCallbackQuery(callback.id, "Done", showAlert = true)
+      of "addsession":
+        let chatId = parseBiggestInt(args[0])
+
+        if callback.message.get().chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = chatId, userId = userId):
+          discard await bot.answerCallbackQuery(callback.id, UNALLOWED, showAlert = true)
+          break callbackBlock
+        discard await bot.answerCallbackQuery(callback.id)
+
+        let chat = conn.getChat(chatId = chatId)
+        let sessionsCount = conn.getSessionsCount(chatId)
+
+        if sessionsCount >= MAX_FREE_SESSIONS or sessionsCount >= MAX_SESSIONS and not chat.premium:
+          let currentMax = if sessionsCount >= MAX_SESSIONS: MAX_SESSIONS else: MAX_FREE_SESSIONS
+          discard await bot.editMessageText(chatId = $callback.message.get().chat.id,
+            messageId = callback.message.get().messageId,
+            text = &"You cannot add more than {currentMax} sessions per chat.",
+          )
+          break callbackBlock
+
         discard await bot.editMessageText(chatId = $callback.message.get().chat.id,
           messageId = callback.message.get().messageId,
-          text = &"*Operation cancelled...* The session name is longer than `{MAX_SESSION_NAME_LENGTH}` characters",
+          text = "*Send me the name for the new session.* Send /cancel to cancel the current operation.",
           parseMode = "markdown",
         )
+
+        try:
+          var message = (await getMessage(userId = userId, chatId = chatId)).message.get()
+          while not message.text.isSome or message.caption.isSome:
+            message = (await getMessage(userId = userId, chatId = chatId)).message.get()
+          let text = if message.text.isSome: message.text.get else: message.caption.get()
+
+          if text.toLower().startswith("/cancel"):
+            discard await bot.editMessageText(chatId = $callback.message.get().chat.id,
+              messageId = callback.message.get().messageId,
+              text = "*Operation cancelled...*",
+              parseMode = "markdown",
+            )
+            await sleepAsync(3 * 1000)
+            discard await bot.deleteMessage(chatId = $callback.message.get().chat.id,
+              messageId = callback.message.get().messageId,
+            )
+            break callbackBlock
+          elif text.len > MAX_SESSION_NAME_LENGTH:
+            discard await bot.editMessageText(chatId = $callback.message.get().chat.id,
+              messageId = callback.message.get().messageId,
+              text = &"*Operation cancelled...* The session name is longer than `{MAX_SESSION_NAME_LENGTH}` characters",
+              parseMode = "markdown",
+            )
+            break callbackBlock
+          
+          discard conn.addSession(Session(name: text, chat: conn.getChat(chatId)))
+          # chatSessions[chatId] = (unixTime(), conn.addSession(Session(name: text, chat: conn.getChat(chatId))))
+          await bot.showSessions(chatId = callback.message.get().chat.id, messageId = callback.message.get().messageId)
+        except TimeoutError:
+          discard await bot.deleteMessage(chatId = $callback.message.get().chat.id,
+            messageId = callback.message.get().messageId,
+          )
+      of "nothing":
+        discard await bot.answerCallbackQuery(callback.id, "This button serves no purpose! ☔️", showAlert = true)
         return
-      
-      discard conn.addSession(Session(name: text, chat: conn.getChat(chatId)))
-      # chatSessions[chatId] = (unixTime(), conn.addSession(Session(name: text, chat: conn.getChat(chatId))))
-      await bot.showSessions(chatId = callback.message.get().chat.id, messageId = callback.message.get().messageId)
-    except TimeoutError:
-      discard await bot.deleteMessage(chatId = $callback.message.get().chat.id,
-        messageId = callback.message.get().messageId,
-      )
-  of "blockusernames":
-    discard "TODO ... (getSettingsKeyboard)"
+      of "usernames":
+        var session = conn.getCachedSession(parseBiggestInt(args[0]))
+        session.chat.blockUsernames = not session.chat.blockUsernames
+        conn.update(session.chat)
+        editSettings()
+      of "links":
+        var session = conn.getCachedSession(parseBiggestInt(args[0]))
+        session.chat.blockLinks = not session.chat.blockLinks
+        conn.update(session.chat)
+        editSettings()
+      of "markov":
+        var session = conn.getCachedSession(parseBiggestInt(args[0]))
+        session.chat.markovDisabled = not session.chat.markovDisabled
+        conn.update(session.chat)
+        editSettings()
+      of "casesensivity":
+        var session = conn.getCachedSession(parseBiggestInt(args[0]))
+        session.caseSensitive = not session.caseSensitive
+        conn.update(session)
+        editSettings()
+      of "sfw":
+        var session = conn.getCachedSession(parseBiggestInt(args[0]))
+        session.chat.keepSfw = not session.chat.keepSfw
+        conn.update(session.chat)
+        editSettings()
+        
+        return
+      of "owoify":
+        var session = conn.getCachedSession(parseBiggestInt(args[0]))
+        session.owoify = (session.owoify + 1) mod 4
+        conn.update(session)
+
+        editSettings()
+        discard await bot.answerCallbackQuery(callback.id,
+          "Done! NOTE: This feature is highly experimental, and it works for english messages only!",
+          showAlert = true,
+        )
+        return
+      of "emojipasta":
+        var session = conn.getCachedSession(parseBiggestInt(args[0]))
+        session.emojipasta = not session.emojipasta
+        conn.update(session)
+
+        editSettings()
+    # After any callback query
+    discard await bot.answerCallbackQuery(callback.id, "Done!")
+  except IOError as err:
+    if "message is not modified" in err.msg:
+      discard await bot.answerCallbackQuery(callback.id, "Done!")
+      return
+    discard await bot.answerCallbackQuery(callback.id, "😔 Oh no, an ERROR occurred, try again. " & CREATOR_STRING, showAlert = true)
+    raise err
 
 proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.} =
   if await listenUpdater(bot, update):
@@ -598,12 +702,16 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
       if not chat.enabled:
         return
 
-      if not markovs.hasKeyOrPut(chatId, (unixTime(), newMarkov(@[text]))):
-        for message in conn.getLatestMessages(session = conn.getCachedSession(chatId)):
-          if message.text != "":
-            markovs.get(chatId).addSample(message.text)
-      else:
-        markovs.get(chatId).addSample(text)
+      let cachedSession = conn.getCachedSession(chatId)
+
+      if text.strip() != "":
+        if cachedSession.chat.keepSfw and text.find(SfwRegex) != -1:
+          # echo "\n\n --- NSFW!!! ---\n\n"
+          return
+        if not markovs.hasKeyOrPut(chatId, (unixTime(), newMarkov(@[text], asLower = not cachedSession.caseSensitive))):
+          conn.refillMarkov(cachedSession)
+        else:
+          markovs.get(chatId).addSample(text, asLower = not cachedSession.caseSensitive)
 
       let user = conn.getOrInsert(database.User(userId: msgUser.id))
       conn.addMessage(database.Message(text: text, sender: user, session: conn.getCachedSession(chat.chatId)))
@@ -616,7 +724,13 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
       if rand(0 .. 100) <= percentage and not isFlood(chatId, rate = 10, seconds = 30): # Max 10 messages per chat per half minute
         let generated = markovs.get(chatId).generate()
         if generated.isSome:
-          discard await bot.sendMessage(chatId, generated.get())
+          var text = generated.get()
+          if cachedSession.owoify != 0:
+            text = text.owoify(getOwoifyLevel(cachedSession.owoify))
+          if cachedSession.emojipasta:
+            text = emojify(text)
+
+          discard await bot.sendMessage(chatId, text)
   except IOError as error:
     if "Bad Request: have no rights to send a message" in error.msg:
       try:
