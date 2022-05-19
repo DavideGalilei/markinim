@@ -4,7 +4,7 @@ import pkg / [telebot, owoifynim, emojipasta]
 import pkg / nimkov / generator
 
 import ./database
-import ./utils/[unixtime, timeout, listen, as_emoji, get_owoify_level]
+import ./utils/[unixtime, timeout, listen, as_emoji, get_owoify_level, human_bytes]
 
 var L = newConsoleLogger(fmtStr="$levelname | [$time] ")
 addHandler(L)
@@ -22,6 +22,7 @@ var
 let uptime = epochTime()
 
 const
+  root = currentSourcePath().parentDir()
   MARKOV_DB = "markov.db"
 
   ANTIFLOOD_SECONDS = 10
@@ -38,20 +39,36 @@ const
   UNALLOWED = "You are not allowed to perform this command"
   CREATOR_STRING = " Please contact my creator if you think this is a mistake (more information on @Markinim)"
   SETTINGS_TEXT = "Tap on a button to toggle an option. Use /percentage to change the ratio of answers from the bot."
+  HELP_TEXT = staticRead(root / "help.md")
 
 
-let SfwRegex = re(
-  (block:
-    const words = staticRead(currentSourcePath() / "../premium/bad-words.csv").strip(chars = {' ', '\n', '\r'})
-    words.split("\n").join("|")),
-  flags = {reIgnoreCase, reStudy},
-)
+let
+  SfwRegex = re(
+    (block:
+      const words = staticRead(root / "premium/bad-words.csv").strip(chars = {' ', '\n', '\r'})
+      words.split("\n").join("|")),
+    flags = {reIgnoreCase, reStudy},
+  )
+
+  UrlRegex = re(r"[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)", flags = {reIgnoreCase, reStudy})
+  UsernameRegex = re("^([a-zA-Z](_(?!_)|[a-zA-Z0-9]){3,32}[a-zA-Z0-9])$", flags = {reIgnoreCase, reStudy})
 
 template get(self: Table[int64, (int64, MarkovGenerator)], chatId: int64): MarkovGenerator =
   self[chatId][1]
 
 proc mention(user: database.User): string =
   return &"[{user.userId}](tg://user?id={user.userId})"
+
+proc isMessageOk(session: Session, text: string): bool =
+  if text.strip() == "":
+    return false
+  elif session.chat.keepSfw and text.find(SfwRegex) != -1:
+    return false
+  elif session.chat.blockLinks and text.find(UrlRegex) != -1:
+    return false
+  elif session.chat.blockUsernames and text.find(UsernameRegex) != -1:
+    return false
+  return true
 
 proc isFlood(chatId: int64, rate: int = ANTIFLOOD_RATE, seconds: int = ANTIFLOOD_SECONDS): bool =
   let time = unixTime()
@@ -73,10 +90,9 @@ proc getCachedSession*(conn: DbConn, chatId: int64): database.Session =
 
 proc refillMarkov(conn: DbConn, session: Session) =
   for message in conn.getLatestMessages(session = session):
-    if message.text.strip() != "":
-      if session.chat.keepSfw and message.text.find(SfwRegex) != -1:
-        continue
-      markovs.get(session.chat.chatId).addSample(message.text, asLower = not session.caseSensitive)
+    if not session.isMessageOk(message.text):
+      continue
+    markovs.get(session.chat.chatId).addSample(message.text, asLower = not session.caseSensitive)
 
 proc cleanerWorker {.async.} =
   while true:
@@ -137,14 +153,14 @@ proc showSessions(bot: Telebot, chatId, messageId: int64, sessions: seq[Session]
   if sessions.len == 0:
     sessions = conn.getSessions(chatId = chatId)
   # if checkDefault:
-  #   discard conn.getDefaultSession(chatId)
+  let defaultSession = conn.getDefaultSession(chatId)
 
   discard await bot.editMessageText(chatId = $chatId,
     messageId = int(messageId),
     text = "*Current sessions in this chat.* Send /delete to delete the current one.",
     replyMarkup = newInlineKeyboardMarkup(
       sessions.mapIt(
-        @[InlineKeyboardButton(text: (if it.isDefault: &"🎩 {it.name}" else: it.name) & &" - {conn.getMessagesCount(it)}",
+        @[InlineKeyboardButton(text: (if it.isDefault or it.uuid == defaultSession.uuid: &"🎩 {it.name}" else: it.name) & &" - {conn.getMessagesCount(it)}",
             callbackData: some &"set_{chatId}_{it.uuid}")]
       ) & @[InlineKeyboardButton(text: "Add session", callbackData: some &"addsession_{chatId}")]
     ),
@@ -159,7 +175,7 @@ proc getSettingsKeyboard(session: Session): InlineKeyboardMarkup =
       InlineKeyboardButton(text: &"Links {asEmoji(session.chat.blockLinks)}", callbackData: some &"links_{chatId}"),
     ],
     @[
-      InlineKeyboardButton(text: &"Keep SFW {asEmoji(session.chat.keepSfw)}", callbackData: some &"sfw_{chatId}")
+      InlineKeyboardButton(text: &"[BETA] Keep SFW {asEmoji(session.chat.keepSfw)}", callbackData: some &"sfw_{chatId}")
     ],
     @[
       InlineKeyboardButton(text: &"Disable /markov {asEmoji(session.chat.markovDisabled)}", callbackData: some &"markov_{chatId}"),
@@ -174,13 +190,6 @@ proc getSettingsKeyboard(session: Session): InlineKeyboardMarkup =
     @[
       InlineKeyboardButton(text: &"[BETA] Case sensitive {asEmoji(session.caseSensitive)}", callbackData: some &"casesensivity_{chatId}_{session.uuid}"),
     ],
-    #[
-      TODO:
-      markovDisabled,
-      owoify,
-      emojipasta,
-      ...
-    ]#
   )
 
 proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[string]) {.async.} =
@@ -200,7 +209,9 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       replyMarkup = newInlineKeyboardMarkup(@[InlineKeyboardButton(text: "Add me :D", url: some &"https://t.me/{botUsername}?startgroup=enable")])
     )
   of "help":
-    discard
+    if message.chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = message.chat.id, userId = senderId):
+      return
+    discard await bot.sendMessage(message.chat.id, HELP_TEXT, parseMode = "markdown")
   of "admin", "unadmin", "remadmin":
     if len(args) < 1:
       return
@@ -239,14 +250,20 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
     if senderId notin admins:
       discard await bot.sendMessage(message.chat.id, UNALLOWED)
       return
-    discard await bot.sendMessage(message.chat.id,
-      &"*Users*: `{conn.getCount(database.User)}`\n" &
+
+    var statsMessage = &"*Users*: `{conn.getCount(database.User)}`\n" &
       &"*Chats*: `{conn.getCount(database.Chat)}`\n" &
       &"*Messages*: `{conn.getCount(database.Message)}`\n" &
       &"*Sessions*: `{conn.getCount(database.Session)}`\n" &
       &"*Cached sessions*: `{len(chatSessions)}`\n" &
       &"*Cached markovs*: `{len(markovs)}`\n" &
-      &"*Uptime*: `{toInt(epochTime() - uptime)}`s",
+      &"*Uptime*: `{toInt(epochTime() - uptime)}`s\n" &
+      &"*Database size*: `{humanBytes(getFileSize(MARKOV_DB))}`"
+
+    if command == "stats":
+      statsMessage &= &"\n\n*Memory usage*:\n{GC_getStatistics()}"
+    discard await bot.sendMessage(message.chat.id,
+      statsMessage,
       parseMode = "markdown")
   of "banpeer", "unbanpeer":
     const banCommand = "banpeer"
@@ -342,7 +359,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
 
     let cachedSession = conn.getCachedSession(message.chat.id)
 
-    if cachedSession.chat.markovDisabled:
+    if cachedSession.chat.markovDisabled and not await bot.isAdminInGroup(chatId = message.chat.id, userId = senderId):
       return
 
     if not markovs.hasKey(message.chat.id):
@@ -550,10 +567,10 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
         discard await bot.answerCallbackQuery(callback.id)
 
         let chat = conn.getChat(chatId = chatId)
-        let sessionsCount = conn.getSessionsCount(chatId)
+        var sessionsCount = conn.getSessionsCount(chatId)
 
-        if sessionsCount >= MAX_FREE_SESSIONS or sessionsCount >= MAX_SESSIONS and not chat.premium:
-          let currentMax = if sessionsCount >= MAX_SESSIONS: MAX_SESSIONS else: MAX_FREE_SESSIONS
+        if sessionsCount >= MAX_FREE_SESSIONS or (sessionsCount >= MAX_SESSIONS and not chat.premium):
+          let currentMax = if chat.premium: MAX_SESSIONS else: MAX_FREE_SESSIONS
           discard await bot.editMessageText(chatId = $callback.message.get().chat.id,
             messageId = callback.message.get().messageId,
             text = &"You cannot add more than {currentMax} sessions per chat.",
@@ -591,9 +608,17 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
             )
             break callbackBlock
           
-          discard conn.addSession(Session(name: text, chat: conn.getChat(chatId)))
-          # chatSessions[chatId] = (unixTime(), conn.addSession(Session(name: text, chat: conn.getChat(chatId))))
-          await bot.showSessions(chatId = callback.message.get().chat.id, messageId = callback.message.get().messageId)
+          sessionsCount = conn.getSessionsCount(chatId)
+          if sessionsCount >= MAX_FREE_SESSIONS or (sessionsCount >= MAX_SESSIONS and not chat.premium):
+            let currentMax = if chat.premium: MAX_SESSIONS else: MAX_FREE_SESSIONS
+            discard await bot.editMessageText(chatId = $callback.message.get().chat.id,
+              messageId = callback.message.get().messageId,
+              text = &"You cannot add more than {currentMax} sessions per chat.",
+            )
+          else:
+            discard conn.addSession(Session(name: text, chat: conn.getChat(chatId)))
+            # chatSessions[chatId] = (unixTime(), conn.addSession(Session(name: text, chat: conn.getChat(chatId))))
+            await bot.showSessions(chatId = callback.message.get().chat.id, messageId = callback.message.get().messageId)
         except TimeoutError:
           discard await bot.deleteMessage(chatId = $callback.message.get().chat.id,
             messageId = callback.message.get().messageId,
@@ -704,14 +729,13 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
 
       let cachedSession = conn.getCachedSession(chatId)
 
-      if text.strip() != "":
-        if cachedSession.chat.keepSfw and text.find(SfwRegex) != -1:
-          # echo "\n\n --- NSFW!!! ---\n\n"
-          return
-        if not markovs.hasKeyOrPut(chatId, (unixTime(), newMarkov(@[text], asLower = not cachedSession.caseSensitive))):
-          conn.refillMarkov(cachedSession)
-        else:
-          markovs.get(chatId).addSample(text, asLower = not cachedSession.caseSensitive)
+      if not cachedSession.isMessageOk(text):
+        # echo "\n\n --- NSFW!!! ---\n\n"
+        return
+      elif not markovs.hasKeyOrPut(chatId, (unixTime(), newMarkov(@[text], asLower = not cachedSession.caseSensitive))):
+        conn.refillMarkov(cachedSession)
+      else:
+        markovs.get(chatId).addSample(text, asLower = not cachedSession.caseSensitive)
 
       let user = conn.getOrInsert(database.User(userId: msgUser.id))
       conn.addMessage(database.Message(text: text, sender: user, session: conn.getCachedSession(chat.chatId)))
@@ -746,7 +770,7 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
 
 proc main {.async.} =
   let
-    configFile = currentSourcePath.parentDir / "../secret.ini"
+    configFile = root / "../secret.ini"
     config = if fileExists(configFile): loadConfig(configFile)
       else: loadConfig(newStringStream())
     botToken = config.getSectionValue("config", "token", getEnv("BOT_TOKEN"))

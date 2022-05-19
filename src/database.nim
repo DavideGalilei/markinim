@@ -23,6 +23,7 @@ type
     keepSfw*: bool # [BETA]
     #    https://www.surgehq.ai/blog/the-obscenity-list-surge
     # -> https://www.kaggle.com/nicapotato/bad-bad-words
+    #    https://www.cs.cmu.edu/~biglou/resources/bad-words.txt
 
     markovDisabled*: bool
 
