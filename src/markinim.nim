@@ -789,7 +789,7 @@ proc main {.async.} =
     banned.incl(bannedUser.userId)
 
   let bot = newTeleBot(botToken)
-  botUsername = bot.username # (await bot.getMe()).username.get().toLower()
+  botUsername = (await bot.getMe()).username.get().toLower()
 
   asyncCheck cleanerWorker()
 
