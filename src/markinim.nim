@@ -62,11 +62,11 @@ proc mention(user: database.User): string =
 proc isMessageOk(session: Session, text: string): bool =
   if text.strip() == "":
     return false
-  elif session.chat.keepSfw and text.find(SfwRegex) != -1:
+  elif session.chat.keepSfw and text.findAll(SfwRegex).len != 0:
     return false
-  elif session.chat.blockLinks and text.find(UrlRegex) != -1:
+  elif session.chat.blockLinks and text.findAll(UrlRegex).len != 0:
     return false
-  elif session.chat.blockUsernames and text.find(UsernameRegex) != -1:
+  elif session.chat.blockUsernames and text.findAll(UsernameRegex).len != 0:
     return false
   return true
 
