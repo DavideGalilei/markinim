@@ -50,8 +50,8 @@ let
     flags = {reIgnoreCase, reStudy},
   )
 
-  UrlRegex = re(r"[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)", flags = {reIgnoreCase, reStudy})
-  UsernameRegex = re("^([a-zA-Z](_(?!_)|[a-zA-Z0-9]){3,32}[a-zA-Z0-9])$", flags = {reIgnoreCase, reStudy})
+  UrlRegex = re(r"""(?i)\b((?:https?://|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'\".,<>?«»“”‘’]))"""", flags = {reIgnoreCase, reStudy})
+  UsernameRegex = re("@([a-zA-Z](_(?!_)|[a-zA-Z0-9]){3,32}[a-zA-Z0-9])", flags = {reIgnoreCase, reStudy})
 
 template get(self: Table[int64, (int64, MarkovGenerator)], chatId: int64): MarkovGenerator =
   self[chatId][1]
@@ -658,7 +658,10 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
         session.chat.keepSfw = not session.chat.keepSfw
         conn.update(session.chat)
         editSettings()
-        
+        discard await bot.answerCallbackQuery(callback.id,
+          "Done! NOTE: This feature is highly experimental, and it works for english messages only!",
+          showAlert = true,
+        )
         return
       of "owoify":
         adminCheck()
@@ -667,11 +670,6 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
         conn.update(session)
 
         editSettings()
-        discard await bot.answerCallbackQuery(callback.id,
-          "Done! NOTE: This feature is highly experimental, and it works for english messages only!",
-          showAlert = true,
-        )
-        return
       of "emojipasta":
         adminCheck()
         var session = conn.getCachedSession(parseBiggestInt(args[0]))
