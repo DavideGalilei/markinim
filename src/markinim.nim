@@ -50,7 +50,7 @@ let
     flags = {reIgnoreCase, reStudy},
   )
 
-  UrlRegex = re(r"""(?i)\b((?:https?://|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'\".,<>?«»“”‘’]))"""", flags = {reIgnoreCase, reStudy})
+  UrlRegex = re(r"""(?i)\b((?:https?://|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'\".,<>?«»“”‘’]))""", flags = {reIgnoreCase, reStudy})
   UsernameRegex = re("@([a-zA-Z](_(?!_)|[a-zA-Z0-9]){3,32}[a-zA-Z0-9])", flags = {reIgnoreCase, reStudy})
 
 template get(self: Table[int64, (int64, MarkovGenerator)], chatId: int64): MarkovGenerator =
