@@ -90,9 +90,8 @@ proc getCachedSession*(conn: DbConn, chatId: int64): database.Session =
 
 proc refillMarkov(conn: DbConn, session: Session) =
   for message in conn.getLatestMessages(session = session):
-    if not session.isMessageOk(message.text):
-      continue
-    markovs.get(session.chat.chatId).addSample(message.text, asLower = not session.caseSensitive)
+    if session.isMessageOk(message.text):
+      markovs.get(session.chat.chatId).addSample(message.text, asLower = not session.caseSensitive)
 
 proc cleanerWorker {.async.} =
   while true:
@@ -555,7 +554,11 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
 
         chatSessions[chatId] = (unixTime(), newSession[0])
 
-        markovs[chatId] = (unixTime(), newMarkov(conn.getLatestMessages(session = newSession[0]).mapIt(it.text), asLower = not newSession[0].caseSensitive))
+        markovs[chatId] = (unixTime(), newMarkov(
+          conn.getLatestMessages(session = newSession[0])
+          .filterIt(newSession[0].isMessageOk(it.text))
+          .mapIt(it.text), asLower = not newSession[0].caseSensitive)
+        )
 
         await bot.showSessions(chatId = callback.message.get().chat.id,
           messageId = callback.message.get().messageId,
