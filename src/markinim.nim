@@ -11,7 +11,6 @@ addHandler(L)
 
 var
   conn: DbConn
-  botUsername: string
   admins: HashSet[int64]
   banned: HashSet[int64]
   markovs: Table[int64, (int64, MarkovGenerator)] # (chatId): (timestamp, MarkovChain)
@@ -205,7 +204,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       return
     discard await bot.sendMessage(message.chat.id,
       startMessage,
-      replyMarkup = newInlineKeyboardMarkup(@[InlineKeyboardButton(text: "Add me :D", url: some &"https://t.me/{botUsername}?startgroup=enable")])
+      replyMarkup = newInlineKeyboardMarkup(@[InlineKeyboardButton(text: "Add me :D", url: some &"https://t.me/{bot.username}?startgroup=enable")])
     )
   of "help":
     if message.chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = message.chat.id, userId = senderId):
@@ -727,7 +726,7 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
 
         if '@' in command:
           let splittedCommand = command.split('@')
-          if splittedCommand[^1].toLower() != botUsername:
+          if splittedCommand[^1].toLower() != bot.username.toLower():
             return true
           command = splittedCommand[0]
         await handleCommand(bot, update, command, args)
@@ -740,7 +739,6 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
       let cachedSession = conn.getCachedSession(chatId)
 
       if not cachedSession.isMessageOk(text):
-        # echo "\n\n --- NSFW!!! ---\n\n"
         return
       elif not markovs.hasKeyOrPut(chatId, (unixTime(), newMarkov(@[text], asLower = not cachedSession.caseSensitive))):
         conn.refillMarkov(cachedSession)
@@ -799,16 +797,19 @@ proc main {.async.} =
     banned.incl(bannedUser.userId)
 
   let bot = newTeleBot(botToken)
-  botUsername = (await bot.getMe()).username.get().toLower()
+  bot.username = (await bot.getMe()).username.get()
+  echo "Running... Bot username: ", bot.username
 
   asyncCheck cleanerWorker()
 
   discard await bot.getUpdates(offset = -1)
   bot.onUpdate(updateHandler)
-  await bot.pollAsync(timeout = 300, clean = true)
+  await bot.pollAsync(timeout = 100, clean = true)
+
 
 when isMainModule:
   when defined(windows):
+    # This easter egg deserves to be left here
     if CompileDate != now().format("yyyy-MM-dd"):
       echo "You can't run this on windows after a day"
       quit(1)
