@@ -379,7 +379,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       
       if command == "markov":
         discard await bot.sendMessage(message.chat.id, text)
-      elif command == "quote" and not isFlood(message.chat.id, rate = 2, seconds = 20):
+      elif command == "quote" and not isFlood(message.chat.id, rate = 3, seconds = 20):
         let quotePic = genQuote(text)
         discard await bot.sendPhoto(message.chat.id, "file://" & quotePic)
         discard tryRemoveFile(quotePic)
