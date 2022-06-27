@@ -3,8 +3,9 @@ import pkg / norm / [model, sqlite]
 import pkg / [telebot, owoifynim, emojipasta]
 import pkg / nimkov / generator
 
-import ./database
-import ./utils/[unixtime, timeout, listen, as_emoji, get_owoify_level, human_bytes]
+import database
+import utils / [unixtime, timeout, listen, as_emoji, get_owoify_level, human_bytes]
+import quotes / quote
 
 var L = newConsoleLogger(fmtStr="$levelname | [$time] ")
 addHandler(L)
@@ -37,7 +38,7 @@ const
 
   UNALLOWED = "You are not allowed to perform this command"
   CREATOR_STRING = " Please contact my creator if you think this is a mistake (more information on @Markinim)"
-  SETTINGS_TEXT = "Tap on a button to toggle an option. Use /percentage to change the ratio of answers from the bot."
+  SETTINGS_TEXT = "Tap on a button to toggle an option. Use /percentage to change the ratio of answers from the bot. Use /sessions to manage the sessions."
   HELP_TEXT = staticRead(root / "help.md")
 
 
@@ -349,7 +350,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
         parseMode = "markdown")
     except ValueError:
       discard await bot.sendMessage(message.chat.id, "The value you inserted is not a number")
-  of "markov":
+  of "markov", "quote":
     let enabled = conn.getOrInsert(database.Chat(chatId: message.chat.id)).enabled
     if not enabled:
       discard bot.sendMessage(message.chat.id, "Learning is not enabled in this chat. Enable it with /enable (for groups: admins only)")
@@ -375,7 +376,13 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
         text = text.owoify(getOwoifyLevel(cachedSession.owoify))
       if cachedSession.emojipasta:
         text = emojify(text)
-      discard await bot.sendMessage(message.chat.id, text)
+      
+      if command == "markov":
+        discard await bot.sendMessage(message.chat.id, text)
+      elif command == "quote" and not isFlood(message.chat.id, rate = 2, seconds = 20):
+        let quotePic = genQuote(text)
+        discard await bot.sendPhoto(message.chat.id, "file://" & quotePic)
+        discard tryRemoveFile(quotePic)
     else:
       discard await bot.sendMessage(message.chat.id, "Not enough data to generate a sentence")
   of "export":
@@ -762,7 +769,13 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
           if cachedSession.emojipasta:
             text = emojify(text)
 
-          discard await bot.sendMessage(chatId, text)
+          if rand(0 .. 30) == 20:
+            # Randomly send a quote
+            let quotePic = genQuote(text)
+            discard await bot.sendPhoto(chat.chatId, "file://" & quotePic)
+            discard tryRemoveFile(quotePic)
+          else:
+            discard await bot.sendMessage(chatId, text)
   except IOError as error:
     if "Bad Request: have no rights to send a message" in error.msg:
       try:
