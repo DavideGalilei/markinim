@@ -26,6 +26,7 @@ type
     #    https://www.cs.cmu.edu/~biglou/resources/bad-words.txt
 
     markovDisabled*: bool
+    quotesDisabled*: bool
 
   Session* {.tableName: "sessions".} = ref object of Model
     name*: string
@@ -56,8 +57,9 @@ proc initDatabase*(name: string = "markov.db"): DbConn =
   result.createTables(Message(sender: User(), session: Session(chat: Chat())))
   result.inTransaction"ALTER TABLE sessions ADD owoify INTEGER NOT NULL DEFAULT 0"
   result.inTransaction"ALTER TABLE sessions ADD emojipasta INTEGER NOT NULL DEFAULT 0"
-  result.inTransaction"ALTER TABLE sessions ADD caseSensitive INTEGER NOT NULL DEFAULT 0"
+  result.inTransaction"ALTER TABLE sessions ADD caseSensitive INTEGER NOT NULL DEFAULT 1"
   result.inTransaction"ALTER TABLE chats ADD markovDisabled INTEGER NOT NULL DEFAULT 0"
+  result.inTransaction"ALTER TABLE chats ADD quotesDisabled INTEGER NOT NULL DEFAULT 0"
 
 proc getUser*(conn: DbConn, userId: int64): User =
   new result

@@ -178,6 +178,7 @@ proc getSettingsKeyboard(session: Session): InlineKeyboardMarkup =
     ],
     @[
       InlineKeyboardButton(text: &"Disable /markov {asEmoji(session.chat.markovDisabled)}", callbackData: some &"markov_{chatId}"),
+      InlineKeyboardButton(text: &"Disable quotes {asEmoji(session.chat.quotesDisabled)}", callbackData: some &"quotes_{chatId}"),
     ],
     @[
       InlineKeyboardButton(text: "Session Bound:", callbackData: some"nothing"),
@@ -187,7 +188,7 @@ proc getSettingsKeyboard(session: Session): InlineKeyboardMarkup =
       InlineKeyboardButton(text: &"Owoify {asEmoji(session.owoify)}", callbackData: some &"owoify_{chatId}_{session.uuid}"),
     ],
     @[
-      InlineKeyboardButton(text: &"[BETA] Case sensitive {asEmoji(session.caseSensitive)}", callbackData: some &"casesensivity_{chatId}_{session.uuid}"),
+      InlineKeyboardButton(text: &"Case sensitive {asEmoji(session.caseSensitive)}", callbackData: some &"casesensivity_{chatId}_{session.uuid}"),
     ],
   )
 
@@ -358,9 +359,10 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
 
     let cachedSession = conn.getCachedSession(message.chat.id)
 
-    if cachedSession.chat.markovDisabled and not await bot.isAdminInGroup(chatId = message.chat.id, userId = senderId):
-      return
-
+    if cachedSession.chat.markovDisabled or (command == "quote" and cachedSession.chat.quotesDisabled):
+      if not await bot.isAdminInGroup(chatId = message.chat.id, userId = senderId):
+        return
+    
     if not markovs.hasKey(message.chat.id):
       markovs[message.chat.id] = (unixTime(), newMarkov(@[]))
       conn.refillMarkov(cachedSession)
@@ -655,6 +657,12 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
         session.chat.markovDisabled = not session.chat.markovDisabled
         conn.update(session.chat)
         editSettings()
+      of "quotes":
+        adminCheck()
+        var session = conn.getCachedSession(parseBiggestInt(args[0]))
+        session.chat.quotesDisabled = not session.chat.quotesDisabled
+        conn.update(session.chat)
+        editSettings()
       of "casesensivity":
         adminCheck()
         var session = conn.getCachedSession(parseBiggestInt(args[0]))
@@ -769,7 +777,7 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
           if cachedSession.emojipasta:
             text = emojify(text)
 
-          if rand(0 .. 30) == 20:
+          if not cachedSession.chat.quotesDisabled and rand(0 .. 30) == 20:
             # Randomly send a quote
             let quotePic = genQuote(text)
             discard await bot.sendPhoto(chat.chatId, "file://" & quotePic)
