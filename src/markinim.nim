@@ -768,7 +768,7 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
       if replyMessage.isSome() and replyMessage.get().fromUser.isSome and replyMessage.get().fromUser.get().id == bot.id:
         percentage *= 2
 
-      if rand(0 .. 100) <= percentage and not isFlood(chatId, rate = 10, seconds = 30): # Max 10 messages per chat per half minute
+      if rand(1 .. 100) <= percentage and not isFlood(chatId, rate = 10, seconds = 30): # Max 10 messages per chat per half minute
         let generated = markovs.get(chatId).generate()
         if generated.isSome:
           var text = generated.get()
