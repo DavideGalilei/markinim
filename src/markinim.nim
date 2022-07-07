@@ -823,9 +823,13 @@ proc main {.async.} =
 
   asyncCheck cleanerWorker()
 
-  discard await bot.getUpdates(offset = -1)
-  bot.onUpdate(updateHandler)
-  await bot.pollAsync(timeout = 100, clean = true)
+  while true:
+    try:
+      discard await bot.getUpdates(offset = -1)
+      bot.onUpdate(updateHandler)
+      await bot.pollAsync(timeout = 100, clean = true)
+    except IndexDefect:
+      await sleepAsync(5000) # sleep 5 seconds and retry again
 
 
 when isMainModule:
