@@ -20,6 +20,18 @@ admin = 123456
 $ nim c src/markinim -o markinim
 $ ./markinim
 ```
-or
+or Docker
 
-`docker run --rm -v=(pwd)/markov.db:/code/markov.db -v=(pwd)/secret.ini:/code/secret.ini markinim`
+`$ docker run --rm -v=(pwd)/markov.db:/code/markov.db -v=(pwd)/secret.ini:/code/secret.ini markinim`
+
+or Docker Compose
+
+```
+version: '3.3'
+services:
+    markinim:
+        volumes:
+            - '(pwd)/markov.db:/code/markov.db'
+            - '(pwd)/secret.ini:/code/secret.ini'
+        image: markinim
+```
