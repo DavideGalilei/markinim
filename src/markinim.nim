@@ -784,7 +784,7 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
             discard tryRemoveFile(quotePic)
           else:
             if replyMessage.isSome():
-              discard await bot.sendMessage(chatId, text, replyToMessageId = replyMessage.get().messageId)
+              discard await bot.sendMessage(chatId, text, replyToMessageId = response.messageId)
             else:
               discard await bot.sendMessage(chatId, text)
   except IOError as error:
