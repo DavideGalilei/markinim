@@ -190,6 +190,9 @@ proc getSettingsKeyboard(session: Session): InlineKeyboardMarkup =
     @[
       InlineKeyboardButton(text: &"Case sensitive {asEmoji(session.caseSensitive)}", callbackData: some &"casesensivity_{chatId}_{session.uuid}"),
     ],
+    @[
+      InlineKeyboardButton(text: &"Always reply to replies {asEmoji(session.alwaysReply)}", callbackData: some &"alwaysreply_{chatId}_{session.uuid}"),
+    ],
   )
 
 proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[string]) {.async.} =
@@ -669,6 +672,12 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
         session.caseSensitive = not session.caseSensitive
         conn.update(session)
         editSettings()
+      of "alwaysreply":
+        adminCheck()
+        var session = conn.getCachedSession(parseBiggestInt(args[0]))
+        session.alwaysReply = not session.alwaysReply
+        conn.update(session)
+        editSettings()
       of "sfw":
         adminCheck()
         var session = conn.getCachedSession(parseBiggestInt(args[0]))
@@ -771,7 +780,9 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
       if repliedToMarkinim:
         percentage *= 2
 
-      if rand(1 .. 100) <= percentage and not isFlood(chatId, rate = 10, seconds = 30): # Max 10 messages per chat per half minute
+      if (rand(1 .. 100) <= percentage or (percentage > 0 and repliedToMarkinim and cachedSession.alwaysReply)) and not isFlood(chatId, rate = 10, seconds = 30):
+        # Max 10 messages per chat per 30 seconds
+
         let generated = markovs.get(chatId).generate()
         if generated.isSome:
           var text = generated.get()
