@@ -783,7 +783,10 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
             discard await bot.sendPhoto(chat.chatId, "file://" & quotePic)
             discard tryRemoveFile(quotePic)
           else:
-            discard await bot.sendMessage(chatId, text)
+            if replyMessage.isSome():
+              discard await bot.sendMessage(chatId, text, replyToMessageId = replyMessage.get().messageId)
+            else:
+              discard await bot.sendMessage(chatId, text)
   except IOError as error:
     if "Bad Request: have no rights to send a message" in error.msg:
       try:
