@@ -765,7 +765,10 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
 
       var percentage = chat.percentage
       let replyMessage = update.message.get().replyToMessage
-      if replyMessage.isSome() and replyMessage.get().fromUser.isSome and replyMessage.get().fromUser.get().id == bot.id:
+      
+      let repliedToMarkinim = replyMessage.isSome() and replyMessage.get().fromUser.isSome and replyMessage.get().fromUser.get().id == bot.id
+
+      if repliedToMarkinim:
         percentage *= 2
 
       if rand(1 .. 100) <= percentage and not isFlood(chatId, rate = 10, seconds = 30): # Max 10 messages per chat per half minute
@@ -783,7 +786,7 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
             discard await bot.sendPhoto(chat.chatId, "file://" & quotePic)
             discard tryRemoveFile(quotePic)
           else:
-            if replyMessage.isSome():
+            if repliedToMarkinim:
               discard await bot.sendMessage(chatId, text, replyToMessageId = response.messageId)
             else:
               discard await bot.sendMessage(chatId, text)
