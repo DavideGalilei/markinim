@@ -845,7 +845,8 @@ proc main {.async.} =
       discard await bot.getUpdates(offset = -1)
       bot.onUpdate(updateHandler)
       await bot.pollAsync(timeout = 100, clean = true)
-    except IndexDefect:
+    except Exception, Defect, IndexDefect:
+      echo "Fatal error occurred. Restarting the bot..."
       await sleepAsync(5000) # sleep 5 seconds and retry again
 
 
