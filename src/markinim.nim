@@ -839,11 +839,11 @@ proc main {.async.} =
   echo "Running... Bot username: ", bot.username
 
   asyncCheck cleanerWorker()
+  bot.onUpdate(updateHandler)
+  discard await bot.getUpdates(offset = -1)
 
   while true:
     try:
-      discard await bot.getUpdates(offset = -1)
-      bot.onUpdate(updateHandler)
       await bot.pollAsync(timeout = 100, clean = true)
     except Exception, Defect, IndexDefect:
       echo "Fatal error occurred. Restarting the bot..."
