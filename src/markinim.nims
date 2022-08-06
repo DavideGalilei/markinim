@@ -14,3 +14,7 @@ when not defined(debug):
         switch("deepcopy", "on")
 
 switch("d", "ssl")
+
+# Raise exceptions instead of crashing
+# https://nim-lang.org/docs/manual.html#definitions
+switch("panics", "off")
