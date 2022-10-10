@@ -15,6 +15,8 @@ when not defined(debug):
 
 switch("d", "ssl")
 
-# Raise exceptions instead of crashing
+# Raise exceptions instead of crashing, add traceback
 # https://nim-lang.org/docs/manual.html#definitions
-switch("panics", "off")
+--panics:off
+--stackTrace:on
+--lineTrace:on
