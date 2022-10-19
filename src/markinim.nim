@@ -7,7 +7,7 @@ import database
 import utils / [unixtime, timeout, listen, as_emoji, get_owoify_level, human_bytes]
 import quotes / quote
 
-var L = newConsoleLogger(fmtStr="$levelname | [$time] ")
+var L = newConsoleLogger(fmtStr="$levelname | [$time] ") 
 addHandler(L)
 
 var
@@ -261,7 +261,9 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       &"*Cached sessions*: `{len(chatSessions)}`\n" &
       &"*Cached markovs*: `{len(markovs)}`\n" &
       &"*Uptime*: `{toInt(epochTime() - uptime)}`s\n" &
-      &"*Database size*: `{humanBytes(getFileSize(MARKOV_DB))}`"
+      &"*Database size*: `{humanBytes(getFileSize(MARKOV_DB))}`" &
+      &"*Ram usage*: `{human_bytes(getMaxMem())}`"
+      
 
     if command == "stats":
       statsMessage &= &"\n\n*Memory usage*:\n{GC_getStatistics()}"
