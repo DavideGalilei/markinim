@@ -262,7 +262,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       &"*Cached markovs*: `{len(markovs)}`\n" &
       &"*Uptime*: `{toInt(epochTime() - uptime)}`s\n" &
       &"*Database size*: `{humanBytes(getFileSize(MARKOV_DB))}`" &
-      &"*Ram usage*: `{human_bytes(getMaxMem())}`"
+      &"*Ram usage*: `{humanBytes(getMaxMem())}`"
       
 
     if command == "stats":
@@ -473,7 +473,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
             elif message.replyToMessage.get().fromUser.isSome():
               message.replyToMessage.get().fromUser.get().id
             elif message.replyToMessage.get().senderChat.isSome():
-              message.replyToMessage.get().senderChat.get().id
+              message.replyToMessage.get().senderChat.get().id 
             else:
               discard await bot.sendMessage(chatId = message.chat.id,
                 text = &"Operation failed. No user has been found. {CREATOR_STRING}",
@@ -482,7 +482,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
         except ValueError:
           discard await bot.sendMessage(chatId = message.chat.id,
             text = "Operation failed. Invalid integer (usernames are not allowed).",
-          )
+          ) 
           return
 
         let defaultSession = conn.getCachedSession(message.chat.id)
@@ -519,7 +519,7 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
     callback = update.callbackQuery.get()
     userId = callback.fromUser.id
     data = callback.data.get()
-  
+   
   let
     splitted = data.split('_')
     command = splitted[0]
@@ -536,7 +536,7 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
         )
 
       template adminCheck =
-        let chatId = callback.message.get().chat.id
+        let chatId = callback.message.get().chat.id 
         if callback.message.get().chat.kind.endswith("group") and not await bot.isAdminInGroup(chatId = chatId, userId = userId):
           discard await bot.answerCallbackQuery(callback.id, UNALLOWED, showAlert = true)
           return
@@ -560,7 +560,7 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
 
         let sessions = conn.setDefaultSession(chatId = chatId, uuid = uuid)
         var newSession = sessions.filterIt(it.isDefault)
-
+ 
         if newSession.len < 1:
           let defaultSession = conn.getDefaultSession(chatId)
           newSession.add(defaultSession)
@@ -603,9 +603,9 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
 
         try:
           var message = (await getMessage(userId = userId, chatId = chatId)).message.get()
-          while not message.text.isSome or message.caption.isSome:
+          while not message.text.isSome or message.caption.isSome: 
             message = (await getMessage(userId = userId, chatId = chatId)).message.get()
-          let text = if message.text.isSome: message.text.get else: message.caption.get()
+          let text = if message.text.isSome: message.text.get else: message.caption.get() 
 
           if text.toLower().startswith("/cancel"):
             discard await bot.editMessageText(chatId = $callback.message.get().chat.id,
@@ -649,7 +649,7 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
         var session = conn.getCachedSession(parseBiggestInt(args[0]))
         session.chat.blockUsernames = not session.chat.blockUsernames
         conn.update(session.chat)
-        editSettings()
+        editSettings() 
       of "links":
         adminCheck()
         var session = conn.getCachedSession(parseBiggestInt(args[0]))
@@ -696,7 +696,7 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
         var session = conn.getCachedSession(parseBiggestInt(args[0]))
         session.owoify = (session.owoify + 1) mod 4
         conn.update(session)
-
+ 
         editSettings()
       of "emojipasta":
         adminCheck()
@@ -735,7 +735,7 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
     let response = update.message.get
     if response.text.isSome or response.caption.isSome:
       let
-        msgUser = response.fromUser.get
+        msgUser = response.fromUser.get 
         chatId = response.chat.id
       if msgUser.id notin admins and chatId in banned or msgUser.id in banned:
         return true
@@ -797,7 +797,7 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
             # Randomly send a quote
             let quotePic = genQuote(text)
             discard await bot.sendPhoto(chat.chatId, "file://" & quotePic)
-            discard tryRemoveFile(quotePic)
+            discard tryRemoveFile(quotePic) 
           else:
             if repliedToMarkinim:
               discard await bot.sendMessage(chatId, text, replyToMessageId = response.messageId)
