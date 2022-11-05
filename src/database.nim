@@ -50,7 +50,7 @@ template inTransaction(conn: DbConn, query: string) =
     discard conn.tryExec(sql(query))
 
 
-const DATA_FOLDER = "data"
+const DATA_FOLDER* = "data"
 
 proc initDatabase*(name: string = "markov.db"): DbConn =
   result = open(DATA_FOLDER / name, "", "", "")
@@ -265,7 +265,7 @@ when isMainModule:
   import os
   import std / with
 
-  discard os.tryRemoveFile("markov.db")
+  discard os.tryRemoveFile(DATA_FOLDER / "markov.db")
 
   let conn = initDatabase()
   var user = User(userId: 5001234567)

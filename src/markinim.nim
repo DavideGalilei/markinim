@@ -283,7 +283,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       &"*Cached sessions*: `{len(chatSessions)}`\n" &
       &"*Cached markovs*: `{len(markovs)}`\n" &
       &"*Uptime*: `{toInt(epochTime() - uptime)}`s\n" &
-      &"*Database size*: `{humanBytes(getFileSize(MARKOV_DB))}`\n" &
+      &"*Database size*: `{humanBytes(getFileSize(DATA_FOLDER / MARKOV_DB))}`\n" &
       &"*Memory usage (getOccupiedMem)*: `{humanBytes(getOccupiedMem())}`\n" &
       &"*Memory usage (getTotalMem)*: `{humanBytes(getTotalMem())}`\n"
 
@@ -432,7 +432,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       # discard await bot.sendMessage(message.chat.id, UNALLOWED, threadId=threadId)
       return
     let tmp = getTempDir()
-    copyFileToDir(MARKOV_DB, tmp)
+    copyFileToDir(DATA_FOLDER / MARKOV_DB, tmp)
     discard await bot.sendDocument(senderId, "file://" & (tmp / MARKOV_DB))
     discard tryRemoveFile(tmp / MARKOV_DB)
   of "settings":
