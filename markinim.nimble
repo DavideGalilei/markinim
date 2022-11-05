@@ -11,10 +11,10 @@ bin           = @["markinim"]
 # Dependencies
 
 requires "nim >= 1.4.0"
-requires "telebot"
 requires "pixie"
 requires "norm"
 
 requires "https://github.com/DavideGalilei/nimkov"
 requires "https://github.com/DavideGalilei/owoifynim"
 requires "https://github.com/DavideGalilei/emojipasta"
+requires "https://github.com/DavideGalilei/telebot.nim"

@@ -1,7 +1,9 @@
-# WIP Readme
+# Markinim
 This is the @MarkinimBot Telegram bot's source code. It's a bit messy (it was never meant to be open source at the beginning) so it needs a cleanup, but it works. Memory usage and performance are pretty good. It uses sqlite.
 
 # Deploy
+> For docker instructions, [skip here](#deploy-with-docker)
+
 Install required dependencies:
 
 ```shell
@@ -20,6 +22,8 @@ admin = 123456
 $ nim c src/markinim -o markinim
 $ ./markinim
 ```
-or
-
-`docker run --rm -v=(pwd)/markov.db:/code/markov.db -v=(pwd)/secret.ini:/code/secret.ini markinim`
+## Deploy (with docker)
+- Copy `.env.sample` to `.env.sample`
+- Edit `BOT_TOKEN` and `ADMIN_ID`
+- Build the image with `docker build -t markinim .`
+- Run the bot using `docker run -itd -v="${pwd}/data":/code/data:z --env-file=.env --name=markinimbot markinim`

@@ -1,9 +1,15 @@
 FROM nimlang/nim:1.6.2
 
-COPY . /code
-WORKDIR /code
+RUN mkdir /code
+COPY ./markinim.nimble /code
 
-RUN nimble install -y
-# RUN nim c -d:release -d:ssl -o:markinim src/markinim.nim
+WORKDIR /code
+RUN nimble install --depsOnly -y
+# cache dependencies if code gets modified
+
+COPY . /code
+
+# RUN nimble install -y
+RUN nim c -o:markinim src/markinim.nim
 
 CMD [ "./markinim" ]

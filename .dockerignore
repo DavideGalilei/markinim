@@ -1,3 +1,9 @@
 markov.db
-secret.ini
 markinim
+
+Dockerfile
+.dockerignore
+
+secret.ini
+.env
+.env.sample

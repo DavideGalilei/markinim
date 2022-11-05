@@ -11,9 +11,9 @@ when not defined(debug):
 
     when version > (1, 6, 2):
         switch("mm", "orc")
-        switch("deepcopy", "on")
+        # switch("deepcopy", "on")
 
-switch("d", "ssl")
+--d:ssl
 
 # Raise exceptions instead of crashing, add traceback
 # https://nim-lang.org/docs/manual.html#definitions

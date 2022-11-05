@@ -1,5 +1,5 @@
 import
-  std / [oids, options],
+  std / [os, oids, options],
   norm / model,
   norm / pragmas,
   norm / sqlite
@@ -50,8 +50,10 @@ template inTransaction(conn: DbConn, query: string) =
     discard conn.tryExec(sql(query))
 
 
+const DATA_FOLDER = "data"
+
 proc initDatabase*(name: string = "markov.db"): DbConn =
-  result = open(name, "", "", "")
+  result = open(DATA_FOLDER / name, "", "", "")
   result.createTables(User())
   result.createTables(Chat())
   result.createTables(Session(chat: Chat()))

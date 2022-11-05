@@ -1,3 +1,7 @@
 secret.ini
+.env
 *.db*
 markinim
+data/*
+
+!data/.gitkeep
