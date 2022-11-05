@@ -26,4 +26,4 @@ $ ./markinim
 - Copy `.env.sample` to `.env.sample`
 - Edit `BOT_TOKEN` and `ADMIN_ID`
 - Build the image with `docker build -t markinim .`
-- Run the bot using `docker run -itd -v="${pwd}/data":/code/data:z --env-file=.env --name=markinimbot markinim`
+- Run the bot using `docker run -itd -v="${pwd}/data":/code/data:z --env-file=.env --restart=unless-stopped --name=markinimbot markinim`

@@ -6,7 +6,7 @@ import sqlite3
 
 from pathlib import Path
 
-file = Path(__file__).parent / "markov.db"
+file = Path(__file__).parent / "data" / "markov.db"
 
 with sqlite3.connect(file) as conn:
     cur = conn.cursor()
