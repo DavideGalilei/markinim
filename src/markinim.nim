@@ -56,6 +56,11 @@ let
 template get(self: Table[int64, (int64, MarkovGenerator)], chatId: int64): MarkovGenerator =
   self[chatId][1]
 
+proc echoError(args: varargs[string]) =
+  for arg in args:
+    writeLine(stderr, arg)
+  flushFile(stderr)
+
 proc getThread(message: types.Message): int =
   result = -1
   if message.messageThreadId.isSome:
@@ -861,9 +866,9 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
           let chatId = update.message.get().chat.id
           discard await bot.leaveChat(chatId = $chatId)
       except: discard
-    echo &"[ERROR] | " & $typeof(error) & ": " & error.msg & ";"
+    echoError &"[ERROR] | " & $typeof(error) & ": " & error.msg & ";"
   except Exception as error:
-    echo &"[ERROR] | " & $typeof(error) & ": " & error.msg & ";"
+    echoError &"[ERROR] | " & $typeof(error) & ": " & error.msg & ";"
     # raise error
 
 
@@ -889,7 +894,7 @@ proc main {.async.} =
 
   let bot = newTeleBot(botToken)
   bot.username = (await bot.getMe()).username.get()
-  echo "Running... Bot username: ", bot.username
+  echoError "Running... Bot username: ", bot.username
 
   asyncCheck cleanerWorker()
   bot.onUpdate(updateHandler)
@@ -899,7 +904,7 @@ proc main {.async.} =
     try:
       await bot.pollAsync(timeout = 100, clean = true)
     except Exception, Defect, IndexDefect:
-      echo "Fatal error occurred. Restarting the bot..."
+      echoError "Fatal error occurred. Restarting the bot..."
       await sleepAsync(5000) # sleep 5 seconds and retry again
 
 
@@ -907,7 +912,7 @@ when isMainModule:
   when defined(windows):
     # This easter egg deserves to be left here
     if CompileDate != now().format("yyyy-MM-dd"):
-      echo "You can't run this on windows after a day"
+      echoError "You can't run this on windows after a day"
       quit(1)
 
   try:
