@@ -1,5 +1,7 @@
 markov.db
 markinim
+data/*
+!data/.gitkeep
 
 Dockerfile
 .dockerignore
