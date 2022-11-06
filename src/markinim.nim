@@ -63,7 +63,9 @@ proc echoError(args: varargs[string]) =
 
 proc getThread(message: types.Message): int =
   result = -1
-  if message.messageThreadId.isSome:
+  if (message.messageThreadId.isSome and
+      message.isTopicMessage.isSome and
+      message.isTopicMessage.get):
     result = message.messageThreadId.get
 
 proc mention(user: database.User): string =
