@@ -18,6 +18,7 @@ var
   adminsCache: Table[(int64, int64), (int64, bool)] # (chatId, userId): (unixtime, isAdmin) cache
   chatSessions: Table[int64, (int64, Session)] # (chatId): (unixtime, Session) cache
   antiFlood: Table[int64, seq[int64]]
+  keepLast: int = 1500
 
 let uptime = epochTime()
 
@@ -101,7 +102,7 @@ proc getCachedSession*(conn: DbConn, chatId: int64): database.Session =
   chatSessions[chatId] = (unixTime(), result)
 
 proc refillMarkov(conn: DbConn, session: Session) =
-  for message in conn.getLatestMessages(session = session):
+  for message in conn.getLatestMessages(session = session, count = keepLast):
     if session.isMessageOk(message.text):
       markovs.get(session.chat.chatId).addSample(message.text, asLower = not session.caseSensitive)
 
@@ -639,7 +640,7 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
         chatSessions[chatId] = (unixTime(), newSession[0])
 
         markovs[chatId] = (unixTime(), newMarkov(
-          conn.getLatestMessages(session = newSession[0])
+          conn.getLatestMessages(session = newSession[0], count = keepLast)
           .filterIt(newSession[0].isMessageOk(it.text))
           .mapIt(it.text), asLower = not newSession[0].caseSensitive)
         )
@@ -895,6 +896,8 @@ proc main {.async.} =
       else: loadConfig(newStringStream())
     botToken = config.getSectionValue("config", "token", getEnv("BOT_TOKEN"))
     admin = config.getSectionValue("config", "admin", getEnv("ADMIN_ID"))
+  
+  keepLast = parseInt(config.getSectionValue("config", "keeplast", getEnv("KEEP_LAST", $keepLast)))
 
   conn = initDatabase(MARKOV_DB)
   defer: conn.close()

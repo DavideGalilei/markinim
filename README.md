@@ -18,6 +18,8 @@ token = "1234:abcdefg"
 admin = 123456
 ```
 
+You can also add a `keeplast = 1500` parameter to the configuration, to avoid ram overloads by processing a maximum of keeplast messages per session (default: `1500`)
+
 ```shell
 $ nim c src/markinim -o markinim
 $ ./markinim
@@ -25,5 +27,6 @@ $ ./markinim
 ## Deploy (with docker)
 - Copy `.env.sample` to `.env.sample`
 - Edit `BOT_TOKEN` and `ADMIN_ID`
+- If needed, edit `KEEP_LAST` (default: `1500`. Read above)
 - Build the image with `docker build -t markinim .`
 - Run the bot using `docker run -itd -v="${pwd}/data":/code/data:z --env-file=.env --restart=unless-stopped --name=markinimbot markinim`
