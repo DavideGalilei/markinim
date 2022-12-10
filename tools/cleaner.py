@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 from collections import defaultdict
 
-file = Path(__file__).parent / "data" / "markov.db"
+file = Path(__file__).parent.parent / "data" / "markov.db"
 
 KEEP_LAST = 1500  # messages
 
