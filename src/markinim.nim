@@ -1,7 +1,7 @@
 import std/[asyncdispatch, logging, options, os, times, strutils, strformat, tables, random, sets, parsecfg, sequtils, streams, sugar, re]
 import pkg / norm / [model, sqlite]
 import pkg / [telebot, owoifynim, emojipasta]
-import pkg / nimkov / generator
+import pkg / nimkov / [generator, objects, typedefs]
 
 import database
 import utils / [unixtime, timeout, listen, as_emoji, get_owoify_level, human_bytes]
@@ -413,7 +413,21 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       discard await bot.sendMessage(message.chat.id, "Not enough data to generate a sentence", threadId=threadId)
       return
 
-    let generated = markovs.get(message.chat.id).generate()
+    var start = args.join(" ")
+    if not cachedSession.caseSensitive:
+      start = start.toLower()
+
+    let options = if len(args) > 0:
+        newMarkovGenerateOptions(begin = some start)
+      else:
+        newMarkovGenerateOptions()
+
+    let generator = markovs.get(message.chat.id)
+    let generated = try:
+        generator.generate(options = options)
+      except MarkovGenerateError:
+        generator.generate()
+
     if generated.isSome:
       var text = generated.get()
       if cachedSession.owoify != 0:
@@ -868,9 +882,9 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
           let chatId = update.message.get().chat.id
           discard await bot.leaveChat(chatId = $chatId)
       except: discard
-    echoError &"[ERROR] | " & $typeof(error) & ": " & error.msg & ";"
+    echoError &"[ERROR] | " & $error.name & ": " & error.msg & ";"
   except Exception as error:
-    echoError &"[ERROR] | " & $typeof(error) & ": " & error.msg & ";"
+    echoError &"[ERROR] | " & $error.name & ": " & error.msg & ";"
     # raise error
 
 
