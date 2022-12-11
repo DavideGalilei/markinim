@@ -75,11 +75,11 @@ proc mention(user: database.User): string =
 proc isMessageOk(session: Session, text: string): bool =
   if text.strip() == "":
     return false
-  elif session.chat.keepSfw and text.findAll(SfwRegex).len != 0:
+  elif session.chat.keepSfw and text.find(SfwRegex) != -1:
     return false
-  elif session.chat.blockLinks and text.findAll(UrlRegex).len != 0:
+  elif session.chat.blockLinks and text.find(UrlRegex) != -1:
     return false
-  elif session.chat.blockUsernames and text.findAll(UsernameRegex).len != 0:
+  elif session.chat.blockUsernames and text.find(UsernameRegex) != -1:
     return false
   return true
 
@@ -183,8 +183,8 @@ proc getSettingsKeyboard(session: Session): InlineKeyboardMarkup =
   let chatId = session.chat.chatId
   return newInlineKeyboardMarkup(
     @[
-      InlineKeyboardButton(text: &"Usernames {asEmoji(session.chat.blockUsernames)}", callbackData: some &"usernames_{chatId}"),
-      InlineKeyboardButton(text: &"Links {asEmoji(session.chat.blockLinks)}", callbackData: some &"links_{chatId}"),
+      InlineKeyboardButton(text: &"Usernames {asEmoji(not session.chat.blockUsernames)}", callbackData: some &"usernames_{chatId}"),
+      InlineKeyboardButton(text: &"Links {asEmoji(not session.chat.blockLinks)}", callbackData: some &"links_{chatId}"),
     ],
     @[
       InlineKeyboardButton(text: &"[BETA] Keep SFW {asEmoji(session.chat.keepSfw)}", callbackData: some &"sfw_{chatId}")
