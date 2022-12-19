@@ -1,7 +1,7 @@
 import std/[asyncdispatch, logging, options, os, times, strutils, strformat, tables, random, sets, parsecfg, sequtils, streams, sugar, re]
 import pkg / norm / [model, sqlite]
 import pkg / [telebot, owoifynim, emojipasta]
-import pkg / nimkov / [generator, objects, typedefs]
+import pkg / nimkov / [generator, objects, typedefs, constants]
 
 import database
 import utils / [unixtime, timeout, listen, as_emoji, get_owoify_level, human_bytes]
@@ -418,7 +418,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
     if not cachedSession.caseSensitive:
       start = start.toLower()
 
-    let options = if len(args) > 0:
+    let options = if len(args) > 0 and (args[0] != mrkvEnd or len(args) >= 2):
         newMarkovGenerateOptions(begin = some start)
       else:
         newMarkovGenerateOptions()
