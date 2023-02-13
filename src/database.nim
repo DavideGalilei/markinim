@@ -38,6 +38,7 @@ type
     emojipasta*: bool
     caseSensitive*: bool
     alwaysReply*: bool
+    randomReplies*: bool
 
   Message* {.tableName: "messages".} = ref object of Model
     session* {.onDelete: "CASCADE".}: Session
@@ -62,6 +63,7 @@ proc initDatabase*(name: string = "markov.db"): DbConn =
   result.inTransaction"ALTER TABLE sessions ADD emojipasta INTEGER NOT NULL DEFAULT 0"
   result.inTransaction"ALTER TABLE sessions ADD caseSensitive INTEGER NOT NULL DEFAULT 1"
   result.inTransaction"ALTER TABLE sessions ADD alwaysReply INTEGER NOT NULL DEFAULT 0"
+  result.inTransaction"ALTER TABLE sessions ADD randomReplies INTEGER NOT NULL DEFAULT 0"
   result.inTransaction"ALTER TABLE chats ADD markovDisabled INTEGER NOT NULL DEFAULT 0"
   result.inTransaction"ALTER TABLE chats ADD quotesDisabled INTEGER NOT NULL DEFAULT 0"
 

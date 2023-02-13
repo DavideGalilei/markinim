@@ -206,6 +206,9 @@ proc getSettingsKeyboard(session: Session): InlineKeyboardMarkup =
     @[
       InlineKeyboardButton(text: &"Always reply to replies {asEmoji(session.alwaysReply)}", callbackData: some &"alwaysreply_{chatId}_{session.uuid}"),
     ],
+    @[
+      InlineKeyboardButton(text: &"Randomly quote messages {asEmoji(session.randomReplies)}", callbackData: some &"randomreplies_{chatId}_{session.uuid}"),
+    ],
   )
 
 proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[string]) {.async.} =
@@ -436,11 +439,15 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       if cachedSession.emojipasta:
         text = emojify(text)
       
+      var replyToMessageId = 0
+      if message.replyToMessage.isSome():
+        replyToMessageId = message.replyToMessage.get().messageId
+
       if command == "markov":
-        discard await bot.sendMessage(message.chat.id, text, threadId=threadId)
+        discard await bot.sendMessage(message.chat.id, text, threadId = threadId, replyToMessageId = replyToMessageId)
       elif command == "quote" and not isFlood(message.chat.id, rate = 3, seconds = 20):
         let quotePic = genQuote(text)
-        discard await bot.sendPhoto(message.chat.id, "file://" & quotePic)
+        discard await bot.sendPhoto(message.chat.id, "file://" & quotePic, replyToMessageId = replyToMessageId)
         discard tryRemoveFile(quotePic)
     else:
       discard await bot.sendMessage(message.chat.id, "Not enough data to generate a sentence", threadId=threadId)
@@ -752,6 +759,12 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
         session.alwaysReply = not session.alwaysReply
         conn.update(session)
         editSettings()
+      of "randomreplies":
+        adminCheck()
+        var session = conn.getCachedSession(parseBiggestInt(args[0]))
+        session.randomReplies = not session.randomReplies
+        conn.update(session)
+        editSettings()
       of "sfw":
         adminCheck()
         var session = conn.getCachedSession(parseBiggestInt(args[0]))
@@ -872,7 +885,7 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
             discard await bot.sendPhoto(chat.chatId, "file://" & quotePic)
             discard tryRemoveFile(quotePic)
           else:
-            if repliedToMarkinim:
+            if repliedToMarkinim or (rand(1 .. 100) <= (percentage div 2) and cachedSession.randomReplies):
               discard await bot.sendMessage(chatId, text, replyToMessageId = response.messageId, threadId=threadId)
             else:
               discard await bot.sendMessage(chatId, text, threadId=threadId)
@@ -887,6 +900,8 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
   except Exception as error:
     echoError &"[ERROR] | " & $error.name & ": " & error.msg & ";"
     # raise error
+  except:
+    echoError "[ERROR] Fatal: uncaught error"
 
 
 proc main {.async.} =
@@ -922,7 +937,8 @@ proc main {.async.} =
   while true:
     try:
       await bot.pollAsync(timeout = 100, clean = true)
-    except Exception, Defect, IndexDefect:
+    
+    except:  #  Exception, Defect, IndexDefect
       echoError "Fatal error occurred. Restarting the bot..."
       await sleepAsync(5000) # sleep 5 seconds and retry again
 
