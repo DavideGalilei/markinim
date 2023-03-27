@@ -16,6 +16,7 @@ Then create a `secret.ini` file which looks like this, where admin is your Teleg
 [config]
 token = "1234:abcdefg"
 admin = 123456
+logging = 1
 ```
 
 You can also add a `keeplast = 1500` parameter to the configuration, to avoid ram overloads by processing a maximum of keeplast messages per session (default: `1500`)

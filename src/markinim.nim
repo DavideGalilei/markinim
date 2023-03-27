@@ -8,7 +8,6 @@ import utils / [unixtime, timeout, listen, as_emoji, get_owoify_level, human_byt
 import quotes / quote
 
 var L = newConsoleLogger(fmtStr="$levelname | [$time] ")
-addHandler(L)
 
 var
   conn: DbConn
@@ -59,7 +58,8 @@ template get(self: Table[int64, (int64, MarkovGenerator)], chatId: int64): Marko
 
 proc echoError(args: varargs[string]) =
   for arg in args:
-    writeLine(stderr, arg)
+    write(stderr, arg)
+    write(stderr, ' ')
   flushFile(stderr)
 
 proc getThread(message: types.Message): int =
@@ -911,7 +911,8 @@ proc main {.async.} =
       else: loadConfig(newStringStream())
     botToken = config.getSectionValue("config", "token", getEnv("BOT_TOKEN"))
     admin = config.getSectionValue("config", "admin", getEnv("ADMIN_ID"))
-  
+    loggingEnabled = config.getSectionValue("config", "logging", getEnv("LOGGING")).strip() == "1"
+
   keepLast = parseInt(config.getSectionValue("config", "keeplast", getEnv("KEEP_LAST", $keepLast)))
 
   conn = initDatabase(MARKOV_DB)
@@ -927,8 +928,13 @@ proc main {.async.} =
     banned.incl(bannedUser.userId)
 
   let bot = newTeleBot(botToken)
-  bot.username = (await bot.getMe()).username.get()
+  bot.username = (await bot.getMe()).username.get().strip()
   echoError "Running... Bot username: ", bot.username
+
+  if loggingEnabled:
+    addHandler(L)
+  else:
+    echoError "Warning: logging is not enabled. Enable it with [LOGGING=1 in .env] or [logging = 1 in secret.ini] if needed"
 
   asyncCheck cleanerWorker()
   bot.onUpdate(updateHandler)
@@ -937,7 +943,6 @@ proc main {.async.} =
   while true:
     try:
       await bot.pollAsync(timeout = 100, clean = true)
-    
     except:  #  Exception, Defect, IndexDefect
       echoError "Fatal error occurred. Restarting the bot..."
       await sleepAsync(5000) # sleep 5 seconds and retry again
