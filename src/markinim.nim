@@ -59,7 +59,7 @@ template get(self: Table[int64, (int64, MarkovGenerator)], chatId: int64): Marko
 proc echoError(args: varargs[string]) =
   for arg in args:
     write(stderr, arg)
-    write(stderr, ' ')
+  write(stderr, '\n')
   flushFile(stderr)
 
 proc getThread(message: types.Message): int =
