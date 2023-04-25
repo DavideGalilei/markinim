@@ -890,7 +890,7 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
             else:
               discard await bot.sendMessage(chatId, text, threadId=threadId)
   except IOError as error:
-    if "Bad Request: have no rights to send a message" in error.msg:
+    if "Bad Request: have no rights to send a message" in error.msg or "not enough rights to send text messages to the chat" in error.msg:
       try:
         if update.message.isSome():
           let chatId = update.message.get().chat.id
