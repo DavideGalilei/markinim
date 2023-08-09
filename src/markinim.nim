@@ -913,6 +913,10 @@ proc main {.async.} =
     admin = config.getSectionValue("config", "admin", getEnv("ADMIN_ID"))
     loggingEnabled = config.getSectionValue("config", "logging", getEnv("LOGGING")).strip() == "1"
 
+  if botToken == "":
+    echoError "[ERROR]: Token not provided. Check secret.ini or environment variables"
+    quit(1)
+
   keepLast = parseInt(config.getSectionValue("config", "keeplast", getEnv("KEEP_LAST", $keepLast)))
 
   conn = initDatabase(MARKOV_DB)

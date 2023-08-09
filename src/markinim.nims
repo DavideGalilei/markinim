@@ -11,7 +11,7 @@ when not defined(debug):
 
     when version > (1, 6, 2):
         switch("mm", "orc")
-        # switch("deepcopy", "on")
+        switch("deepcopy", "on")
 
 --d:ssl
 

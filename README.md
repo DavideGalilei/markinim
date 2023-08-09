@@ -22,7 +22,7 @@ logging = 1
 You can also add a `keeplast = 1500` parameter to the configuration, to avoid ram overloads by processing a maximum of keeplast messages per session (default: `1500`)
 
 ```shell
-$ nim c src/markinim -o markinim
+$ nim c -o:markinim src/markinim.nim
 $ ./markinim
 ```
 ## Deploy (with docker)
