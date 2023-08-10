@@ -26,7 +26,7 @@ $ nim c -o:markinim src/markinim.nim
 $ ./markinim
 ```
 ## Deploy (with docker)
-- Copy `.env.sample` to `.env.sample`
+- Copy `.env.sample` to `.env`
 - Edit `BOT_TOKEN` and `ADMIN_ID`
 - If needed, edit `KEEP_LAST` (default: `1500`. Read above)
 - Build the image with `docker build -t markinim .`
