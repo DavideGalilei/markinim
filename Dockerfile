@@ -1,4 +1,9 @@
-FROM nimlang/nim:1.6.2
+FROM nimlang/choosenim
+
+RUN apt install -y libsqlite3-dev sqlite3
+
+RUN choosenim 1.6.10 && \
+    nimble install -y nimble
 
 RUN mkdir /code
 COPY ./markinim.nimble /code

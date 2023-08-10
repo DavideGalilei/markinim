@@ -12,7 +12,7 @@ bin           = @["markinim"]
 
 requires "nim >= 1.4.0"
 requires "pixie"
-requires "norm"
+requires "norm == 2.8.0"
 
 requires "https://github.com/DavideGalilei/nimkov"
 requires "https://github.com/DavideGalilei/owoifynim"
