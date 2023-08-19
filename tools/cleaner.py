@@ -2,14 +2,32 @@
 # from the database, and vacuum it, to make it smaller
 # and faster.
 
+import re
+import os
+
 import sqlite3
 
 from pathlib import Path
 from collections import defaultdict
 
-file = Path(__file__).parent.parent / "data" / "markov.db"
+root = Path(__file__).parent.parent
+file = root / "data" / "markov.db"
+env = root / ".env"
 
-KEEP_LAST = 1500  # messages
+KEEP_LAST_RE = re.compile(r"^KEEP_LAST\s*=\s*(\d+)")
+KEEP_LAST = os.environ.get("KEEP_LAST", None)
+
+if KEEP_LAST is None and env.exists():
+    with env.open() as f:
+        for line in f:
+            m = KEEP_LAST_RE.match(line)
+            if m:
+                KEEP_LAST = int(m.group(1))
+                break
+
+if KEEP_LAST is None:
+    # Fall back to default
+    KEEP_LAST = 12000  # messages
 
 with sqlite3.connect(file) as conn:
     count = conn.cursor().execute("SELECT COUNT(1) FROM messages").fetchone()[0]
