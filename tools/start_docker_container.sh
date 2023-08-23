@@ -1,3 +1,3 @@
 #!/bin/bash
 set -xeuo pipefail
-docker restart markinim
+docker restart markinimbot
