@@ -20,14 +20,7 @@ mkdir -p "$backup_directory"
 # Clean redundant data
 python3 tools/cleaner.py
 
-# Disable WAL mode
-sqlite3 "$root_dir/markov.db" "PRAGMA journal_mode = DELETE;"
-
-# Perform the backup
 sqlite3 "$root_dir/markov.db" ".backup '$backup_directory/$backup_filename'"
-
-# Re-enable WAL mode
-sqlite3 "$root_dir/markov.db" "PRAGMA journal_mode = WAL;"
 
 if [ -n "$TELEGRAM_ID" ]; then
     source "$root_dir/.env" || true
