@@ -20,7 +20,7 @@ mkdir -p "$backup_directory"
 # Clean redundant data
 python3 tools/cleaner.py
 
-sqlite3 "$root_dir/markov.db" ".backup '$backup_directory/$backup_filename'"
+sqlite3 "$root_dir/data/markov.db" ".backup $backup_directory/$backup_filename"
 
 if [ -n "$TELEGRAM_ID" ]; then
     source "$root_dir/.env" || true
