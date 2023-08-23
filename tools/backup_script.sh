@@ -33,5 +33,4 @@ while true; do
     fi
 
     # syncthing will sync the backup in background
-    sleep 4h
 done
