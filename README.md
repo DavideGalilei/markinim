@@ -37,10 +37,9 @@ $ ./markinim
 - Setup [`syncthing`](https://syncthing.net/) if you want to sync the backups to another device
 - Edit `tools/backup_script.sh` and set the correct values for `root_dir`, `backup_directory` and `backup_filename`
 - Optionally, edit `TELEGRAM_ID` to receive a notification when the backup is done
-- Edit `tools/backup_script.service` and set the correct path for `ExecStart`, `WorkingDirectory`, `ExecStartPre` and `ExecStartPost`
-- Copy `tools/backup_script.service` to `/etc/systemd/system/`
-- ```shell
-  $ systemctl daemon-reload
-  $ systemctl enable backup_script.service
-  $ systemctl start backup_script.service
-  ```
+- Edit `tools/backup.sh` if you want to change the container name
+- Run a cronjob to run `tools/backup.sh` every 4h (or whatever you want)
+  - Open crontab with `crontab -e`
+  - Add `0 */4 * * * /path/to/markinim/tools/backup.sh`
+  - Save and exit
+- Done! Now you should have a backup every 4h in the specified directory
