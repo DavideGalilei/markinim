@@ -1,4 +1,4 @@
-import std/[asyncdispatch, logging, options, os, times, strutils, strformat, tables, random, sets, parsecfg, sequtils, streams, sugar, re, algorithm]
+import std/[asyncdispatch, logging, options, os, times, strutils, strformat, tables, random, sets, parsecfg, sequtils, streams, sugar, re, algorithm, unicode]
 import pkg / norm / [model, sqlite]
 import pkg / [telebot, owoifynim, emojipasta]
 import pkg / nimkov / [generator, objects, typedefs, constants]
@@ -161,6 +161,8 @@ setControlCHook(handler)
 
 
 proc byLength(a, b: string): int = cmp(len(a), len(b))
+proc trimUnicode(s: string, length: int): string =
+  return s[0 ..< s.runeOffset(length)]
 proc sortCandidates(options: seq[string], length: int): seq[string] =
   var options = options
   # let
@@ -173,7 +175,7 @@ proc sortCandidates(options: seq[string], length: int): seq[string] =
 
   for i in 0 ..< options.len:
     if options[i].len > length:
-      options[i] = options[i][0 ..< length]
+      options[i] = options[i].trimUnicode(length)
 
   return options
 
