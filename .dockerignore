@@ -9,3 +9,4 @@ Dockerfile
 secret.ini
 .env
 .env.sample
+backup/
