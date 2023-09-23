@@ -160,6 +160,24 @@ proc handler() {.noconv.} =
 setControlCHook(handler)
 
 
+proc byLength(a, b: string): int = cmp(len(a), len(b))
+proc sortCandidates(options: seq[string], length: int): seq[string] =
+  var options = options
+  # let
+  #   lengths = options.mapIt(it.len)
+  #   minLength = min(lengths)
+  #   maxLength = max(lengths)
+
+  options.sort(byLength)
+  options.reverse()
+
+  for i in 0 ..< options.len:
+    if options[i].len > length:
+      options[i] = options[i][0 ..< length]
+
+  return options
+
+
 proc showSessions(bot: Telebot, chatId, messageId: int64, sessions: seq[Session] = @[]) {.async.} =
   var sessions = sessions
   if sessions.len == 0:
@@ -491,6 +509,9 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       else:
         break
 
+    options = options.deduplicate(isSorted = false)
+    options = options.sortCandidates(length = 100)
+
     if len(options) < 2:
       discard await bot.sendMessage(message.chat.id, "Not enough data to generate a would you rather poll", messageThreadId=threadId)
       return
@@ -498,9 +519,6 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
     var isAnon: bool = false
     if args.len > 0 and args[0] == "anon":
       isAnon = true
-
-    # sort by length
-    options.sort(proc(a, b: string): int = cmp(len(a), len(b)))
 
     discard await bot.sendPoll(
       chatId = message.chat.id,
