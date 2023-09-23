@@ -35,9 +35,9 @@ $ ./markinim
 ## Backups
 > ⚠️ **WARNING**: This is an experimental backup script. It's not well-tested yet. Use it at your own risk. I am not responsible for any data loss. I don't know if it works.
 - Setup [`syncthing`](https://syncthing.net/) if you want to sync the backups to another device
-- Edit `tools/backup_script.sh` and set the correct values for `root_dir`, `backup_directory` and `backup_filename`
+- Copy `tools/backup_script.example.sh` to `tools/backup_script.sh` and edit it to set the correct values for `root_dir`, `backup_directory` and `backup_filename`
 - Optionally, edit `TELEGRAM_ID` to receive a notification when the backup is done
-- Edit `tools/backup.sh` if you want to change the container name
+- Copy `tools/backup.example.sh` to `tools/backup.sh` and edit it if you want to change the container name
 - Run a cronjob to run `tools/backup.sh` every 4h (or whatever you want)
   - Open crontab with `crontab -e`
   - Add `0 */4 * * * /path/to/markinim/tools/backup.sh`

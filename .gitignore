@@ -7,3 +7,6 @@ data/*
 !data/.gitkeep
 backup/*
 !backup/.gitkeep
+
+tools/backup_script.sh
+tools/backup.sh
