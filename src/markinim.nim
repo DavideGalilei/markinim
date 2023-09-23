@@ -163,7 +163,10 @@ setControlCHook(handler)
 
 proc byLength(a, b: string): int = cmp(len(a), len(b))
 proc trimUnicode(s: string, length: int): string =
-  return s[0 ..< s.runeOffset(length)]
+  let offset = s.runeOffset(length)
+  if offset == -1:
+    return s
+  return s[0 ..< offset]
 proc sortCandidates(options: seq[string], length: int): seq[string] =
   var options = options
   # let
