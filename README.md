@@ -29,7 +29,7 @@ $ ./markinim
 - Copy `.env.sample` to `.env`
 - Edit `BOT_TOKEN` and `ADMIN_ID`
 - If needed, edit `KEEP_LAST` (default: `1500`. Read above)
-- Build and run the image with `docker compose -d --build`
+- Build and run the image with `docker compose up -d --build`
 - Run the bot with `docker compose up -d`
 
 ### Old instructions
