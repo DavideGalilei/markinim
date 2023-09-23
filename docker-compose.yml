@@ -1,0 +1,9 @@
+version: '3'
+services:
+  markinimbot:
+    build: .
+    container_name: markinimbot
+    restart: unless-stopped
+    volumes:
+      - "./data:/code/data:z"
+    env_file: .env
