@@ -27,6 +27,7 @@ type
 
     markovDisabled*: bool
     quotesDisabled*: bool
+    pollsDisabled*: bool
 
   Session* {.tableName: "sessions".} = ref object of Model
     name*: string
@@ -66,6 +67,7 @@ proc initDatabase*(name: string = "markov.db"): DbConn =
   result.inTransaction"ALTER TABLE sessions ADD randomReplies INTEGER NOT NULL DEFAULT 0"
   result.inTransaction"ALTER TABLE chats ADD markovDisabled INTEGER NOT NULL DEFAULT 0"
   result.inTransaction"ALTER TABLE chats ADD quotesDisabled INTEGER NOT NULL DEFAULT 0"
+  result.inTransaction"ALTER TABLE chats ADD pollsDisabled INTEGER NOT NULL DEFAULT 1"
 
 proc getUser*(conn: DbConn, userId: int64): User =
   new result
