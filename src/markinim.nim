@@ -1,4 +1,5 @@
-import std/[asyncdispatch, logging, options, os, times, strutils, strformat, tables, random, sets, parsecfg, sequtils, streams, sugar, re, algorithm, unicode]
+import std/[asyncdispatch, logging, options, os, times, strutils, strformat, tables, random, sets, parsecfg, sequtils, streams, sugar, re, algorithm]
+from std / unicode import runeOffset
 import pkg / norm / [model, sqlite]
 import pkg / [telebot, owoifynim, emojipasta]
 import pkg / nimkov / [generator, objects, typedefs, constants]
