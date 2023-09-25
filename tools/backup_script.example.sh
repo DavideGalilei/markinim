@@ -14,21 +14,26 @@ backup_filename="markov_backup.db"
 # to your telegram user id.
 TELEGRAM_ID=
 
+function sendMessage {
+    if [ -n "$TELEGRAM_ID" ]; then
+        source "$root_dir/.env" || true
+        # if BOT_TOKEN env var exists
+        if [ -n "$BOT_TOKEN" ]; then
+            # curl telegram botapi
+            curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" -d "chat_id=$TELEGRAM_ID" -d "text=$1"
+        fi
+    fi
+}
+
 cd "$root_dir"
 mkdir -p "$backup_directory"
 
+sendMessage "text=[$(date)] [BACKUP] Cleaning database..."
 # Clean redundant data
 python3 tools/cleaner.py
 
+sendMessage "text=[$(date)] [BACKUP] Backing up database..."
 sqlite3 "$root_dir/data/markov.db" ".backup $backup_directory/$backup_filename"
-
-if [ -n "$TELEGRAM_ID" ]; then
-    source "$root_dir/.env" || true
-    # if BOT_TOKEN env var exists
-    if [ -n "$BOT_TOKEN" ]; then
-        # curl telegram botapi
-        curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" -d "chat_id=$TELEGRAM_ID" -d "text=Backup started at $(date)"
-    fi
-fi
+sendMessage "text=[$(date)] [BACKUP] Backup completed"
 
 # syncthing will sync the backup in background
