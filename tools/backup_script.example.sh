@@ -28,12 +28,12 @@ function sendMessage {
 cd "$root_dir"
 mkdir -p "$backup_directory"
 
-sendMessage "text=[$(date)] [BACKUP] Cleaning database..."
+sendMessage "[$(date)] [BACKUP] Cleaning database..."
 # Clean redundant data
 python3 tools/cleaner.py
 
-sendMessage "text=[$(date)] [BACKUP] Backing up database..."
+sendMessage "[$(date)] [BACKUP] Backing up database..."
 sqlite3 "$root_dir/data/markov.db" ".backup $backup_directory/$backup_filename"
-sendMessage "text=[$(date)] [BACKUP] Backup completed"
+sendMessage "[$(date)] [BACKUP] Backup completed"
 
 # syncthing will sync the backup in background
