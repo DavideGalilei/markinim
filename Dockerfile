@@ -2,7 +2,7 @@ FROM nimlang/choosenim
 
 RUN apt install -y libsqlite3-dev sqlite3
 
-RUN choosenim 1.6.10 && \
+RUN choosenim 2.0.2 && \
     nimble install -y nimble
 
 RUN mkdir /code
