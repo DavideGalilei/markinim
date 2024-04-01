@@ -69,34 +69,34 @@ proc initDatabase*(name: string = "markov.db"): DbConn =
   result.inTransaction"ALTER TABLE chats ADD quotesDisabled INTEGER NOT NULL DEFAULT 0"
   result.inTransaction"ALTER TABLE chats ADD pollsDisabled INTEGER NOT NULL DEFAULT 1"
 
-proc getUser*(conn: DbConn, userId: int64): User =
+proc getUser*(conn: DbConn, userId: int64): User {.gcsafe.} =
   new result
   conn.select(result, "users.userId = ?", userId)
 
-proc getChat*(conn: DbConn, chatId: int64): Chat =
+proc getChat*(conn: DbConn, chatId: int64): Chat {.gcsafe.} =
   new result
   conn.select(result, "chats.chatId = ?", chatId)
 
-proc getSession*(conn: DbConn, uuid: string): Session =
+proc getSession*(conn: DbConn, uuid: string): Session {.gcsafe.} =
   result = Session(chat: Chat())
   conn.select(result, "uuid = ?", uuid)
 
-proc getSessions*(conn: DbConn, chatId: int64): seq[Session] =
+proc getSessions*(conn: DbConn, chatId: int64): seq[Session] {.gcsafe.} =
   result = @[Session(chat: Chat())]
   conn.select(result, "chatId = ?", chatId)
 
-proc addUser*(conn: DbConn, user: User): User =
+proc addUser*(conn: DbConn, user: User): User {.gcsafe.} =
   var user = user
   conn.insert user
   return conn.getUser(user.userId)
 
-proc addSession*(conn: DbConn, session: Session): Session =
+proc addSession*(conn: DbConn, session: Session): Session {.gcsafe.} =
   var session = session
   session.uuid = $genOid()
   conn.insert session
   return conn.getSession(session.uuid)
 
-proc getSessionsCount*(conn: DbConn, chatId: int64): int64 =
+proc getSessionsCount*(conn: DbConn, chatId: int64): int64 {.gcsafe.} =
   let query = "SELECT COUNT(*) FROM sessions WHERE chat = (SELECT id FROM chats WHERE chatId = ? LIMIT 1)"
   let params = @[
     DbValue(kind: dvkInt, i: chatId)
@@ -104,9 +104,9 @@ proc getSessionsCount*(conn: DbConn, chatId: int64): int64 =
   return get conn.getValue(int64, sql query, params)
   # return conn.count(Session, "chatId = ?", chatId)
 
-proc getOrInsert*(conn: DbConn, chat: Chat, doNotCreateSession: bool = false): Chat
+proc getOrInsert*(conn: DbConn, chat: Chat, doNotCreateSession: bool = false): Chat {.gcsafe.}
 
-proc getDefaultSession*(conn: DbConn, chatId: int64): Session =
+proc getDefaultSession*(conn: DbConn, chatId: int64): Session {.gcsafe.} =
   result = Session(chat: Chat())
   try:
     conn.select(result, "chat.chatId = ? AND isDefault", chatId)
@@ -124,7 +124,7 @@ proc getDefaultSession*(conn: DbConn, chatId: int64): Session =
       isDefault: true,
     ))
 
-proc setDefaultSession*(conn: DbConn, chatId: int64, uuid: string): seq[Session] =
+proc setDefaultSession*(conn: DbConn, chatId: int64, uuid: string): seq[Session] {.gcsafe.} =
   for session in conn.getSessions(chatId = chatId):
     var session = session
     if session.uuid == uuid:
@@ -154,43 +154,43 @@ proc addChat*(conn: DbConn, chat: Chat, doNotCreateSession: bool = false): Chat 
       isDefault: true,
     ))
 
-proc getOrInsert*(conn: DbConn, user: User): User =
+proc getOrInsert*(conn: DbConn, user: User): User {.gcsafe.} =
   try:
     return conn.getUser(user.userId)
   except NotFoundError:
     return conn.addUser(user) 
 
-proc getOrInsert*(conn: DbConn, chat: Chat, doNotCreateSession: bool = false): Chat =
+proc getOrInsert*(conn: DbConn, chat: Chat, doNotCreateSession: bool = false): Chat {.gcsafe.} =
   try:
     return conn.getChat(chat.chatId)
   except NotFoundError:
     return conn.addChat(chat, doNotCreateSession = doNotCreateSession) 
 
-proc getOrInsert*(conn: DbConn, session: Session): Session =
+proc getOrInsert*(conn: DbConn, session: Session): Session {.gcsafe.} =
   try:
     return conn.getSession(session.uuid)
   except NotFoundError:
     return conn.addSession(session) 
 
-proc updateOrCreate*(conn: DbConn, user: User): User =
+proc updateOrCreate*(conn: DbConn, user: User): User {.gcsafe.} =
   result = conn.getOrInsert(user)
   var user = user
   user.id = result.id
   conn.update(user)
   result = user
 
-proc updateOrCreate*(conn: DbConn, chat: Chat): Chat =
+proc updateOrCreate*(conn: DbConn, chat: Chat): Chat {.gcsafe.} =
   result = conn.getOrInsert(chat)
   var chat = chat
   chat.id = result.id
   conn.update(chat)
   result = chat
 
-proc addMessage*(conn: DbConn, message: Message) =
+proc addMessage*(conn: DbConn, message: Message){.gcsafe.}  =
   var message = message
   conn.insert message
 
-proc getLatestMessages*(conn: DbConn, session: Session, count: int = 1500): seq[Message] =
+proc getLatestMessages*(conn: DbConn, session: Session, count: int = 1500): seq[Message] {.gcsafe.} =
   result = @[Message(sender: User(), session: Session(chat: Chat()))]
   conn.select(result, "uuid = ? AND chatId = ? ORDER BY messages.id DESC LIMIT ?", session.uuid, session.chat.chatId, count)
 
@@ -202,7 +202,7 @@ proc getMessagesCount*(conn: DbConn, session: Session): int64 =
   return get conn.getValue(int64, sql query, params)
   # return conn.count(Session, "chatId = ?", chatId)
 
-proc getUserMessagesCount*(conn: DbConn, session: Session, userId: int64): int64 =
+proc getUserMessagesCount*(conn: DbConn, session: Session, userId: int64): int64 {.gcsafe.} =
   let query = "SELECT COUNT(*) FROM messages WHERE session = (SELECT id FROM sessions WHERE uuid = ? LIMIT 1) AND sender = (SELECT id FROM users WHERE userId = ?)"
   let params = @[
     DbValue(kind: dvkString, s: session.uuid),
@@ -211,7 +211,7 @@ proc getUserMessagesCount*(conn: DbConn, session: Session, userId: int64): int64
   return get conn.getValue(int64, sql query, params)
   # return conn.count(Session, "chatId = ?", chatId)
 
-proc deleteMessages*(conn: DbConn, session: Session): int64 =
+proc deleteMessages*(conn: DbConn, session: Session): int64 {.gcsafe.} =
   result = conn.getMessagesCount(session)
   var query = "DELETE FROM sessions WHERE uuid = ? AND chat = (SELECT id FROM chats WHERE chatId = ? LIMIT 1)"
   var params = @[
@@ -221,7 +221,7 @@ proc deleteMessages*(conn: DbConn, session: Session): int64 =
   conn.exec(sql query, params)
   conn.exec(sql "DELETE FROM messages WHERE session = ?", DbValue(kind: dvkInt, i: session.id))
 
-proc deleteFromUserInChat*(conn: DbConn, session: Session, userId: int64): int64 =
+proc deleteFromUserInChat*(conn: DbConn, session: Session, userId: int64): int64 {.gcsafe.} =
   result = conn.getUserMessagesCount(session, userId = userId)
   var query = "DELETE FROM messages WHERE session = (SELECT id FROM sessions WHERE uuid = ? LIMIT 1) AND sender = (SELECT id FROM users WHERE userId = ? LIMIT 1)"
   var params = @[
@@ -230,39 +230,39 @@ proc deleteFromUserInChat*(conn: DbConn, session: Session, userId: int64): int64
   ]
   conn.exec(sql query, params)
 
-proc getBotAdmins*(conn: DbConn): seq[User] =
+proc getBotAdmins*(conn: DbConn): seq[User] {.gcsafe.} =
   result = @[User()]
   conn.select(result, "admin")
 
-proc getBannedUsers*(conn: DbConn): seq[User] =
+proc getBannedUsers*(conn: DbConn): seq[User] {.gcsafe.} =
   result = @[User()]
   conn.select(result, "banned")
 
-proc setAdmin*(conn: DbConn, userId: int64, admin: bool = true): User =
+proc setAdmin*(conn: DbConn, userId: int64, admin: bool = true): User {.gcsafe.} =
   var user = conn.getOrInsert(User(userId: userId))
   user.admin = admin
   conn.update(user)
   return user
 
-proc setBanned*(conn: DbConn, userId: int64, banned: bool = true): User =
+proc setBanned*(conn: DbConn, userId: int64, banned: bool = true): User {.gcsafe.} =
   var user = conn.getOrInsert(User(userId: userId))
   user.banned = banned
   conn.update(user)
   return user
 
-proc setEnabled*(conn: DbConn, chatId: int64, enabled: bool = true): Chat =
+proc setEnabled*(conn: DbConn, chatId: int64, enabled: bool = true): Chat {.gcsafe.} =
   var chat = conn.getOrInsert(Chat(chatId: chatId))
   chat.enabled = enabled
   conn.update(chat)
   return chat
 
-proc setBanned*(conn: DbConn, chatId: int64, banned: bool = true): Chat =
+proc setBanned*(conn: DbConn, chatId: int64, banned: bool = true): Chat {.gcsafe.} =
   var chat = conn.getOrInsert(Chat(chatId: chatId))
   chat.banned = banned
   conn.update(chat)
   return chat
 
-proc getCount*(conn: DbConn, model: typedesc): int64 =
+proc getCount*(conn: DbConn, model: typedesc): int64 {.gcsafe.} =
   return conn.count(model)
 
 when isMainModule:

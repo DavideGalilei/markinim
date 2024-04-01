@@ -11,14 +11,15 @@ import quotes / quote
 var L = newConsoleLogger(fmtStr="$levelname | [$time] ", levelThreshold = Level.lvlAll)
 
 var
-  conn: DbConn
-  admins: HashSet[int64]
-  banned: HashSet[int64]
-  markovs: Table[int64, (int64, MarkovGenerator)] # (chatId): (timestamp, MarkovChain)
-  adminsCache: Table[(int64, int64), (int64, bool)] # (chatId, userId): (unixtime, isAdmin) cache
-  chatSessions: Table[int64, (int64, Session)] # (chatId): (unixtime, Session) cache
-  antiFlood: Table[int64, seq[int64]]
+  conn {.threadvar.}: DbConn
+  admins {.threadvar.}: HashSet[int64]
+  banned {.threadvar.}: HashSet[int64]
+  markovs {.threadvar.}: Table[int64, (int64, MarkovGenerator)] # (chatId): (timestamp, MarkovChain)
+  adminsCache {.threadvar.}: Table[(int64, int64), (int64, bool)] # (chatId, userId): (unixtime, isAdmin) cache
+  chatSessions {.threadvar.}: Table[int64, (int64, Session)] # (chatId): (unixtime, Session) cache
+  antiFlood {.threadvar.}: Table[int64, seq[int64]]
   keepLast: int = 1500
+  quoteConfig {.threadvar.}: QuoteConfig
 
 let uptime = epochTime()
 
@@ -74,15 +75,16 @@ proc mention(user: database.User): string =
   return &"[{user.userId}](tg://user?id={user.userId})"
 
 proc isMessageOk(session: Session, text: string): bool =
-  if text.strip() == "":
-    return false
-  elif session.chat.keepSfw and text.find(SfwRegex) != -1:
-    return false
-  elif session.chat.blockLinks and text.find(UrlRegex) != -1:
-    return false
-  elif session.chat.blockUsernames and text.find(UsernameRegex) != -1:
-    return false
-  return true
+  {.cast(gcsafe).}:
+    if text.strip() == "":
+      return false
+    elif session.chat.keepSfw and text.find(SfwRegex) != -1:
+      return false
+    elif session.chat.blockLinks and text.find(UrlRegex) != -1:
+      return false
+    elif session.chat.blockUsernames and text.find(UsernameRegex) != -1:
+      return false
+    return true
 
 proc isFlood(chatId: int64, rate: int = ANTIFLOOD_RATE, seconds: int = ANTIFLOOD_SECONDS): bool =
   let time = unixTime()
@@ -94,7 +96,7 @@ proc isFlood(chatId: int64, rate: int = ANTIFLOOD_RATE, seconds: int = ANTIFLOOD
   antiflood[chatId] = antiflood[chatId].filterIt(time - it < seconds)
   return len(antiflood[chatId]) > rate
 
-proc getCachedSession*(conn: DbConn, chatId: int64): database.Session =
+proc getCachedSession*(conn: DbConn, chatId: int64): database.Session {.gcsafe.} =
   if chatId in chatSessions:
     let (_, session) = chatSessions[chatId]
     return session
@@ -238,7 +240,7 @@ proc getSettingsKeyboard(session: Session): InlineKeyboardMarkup =
     ],
   )
 
-proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[string]) {.async.} =
+proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[string]) {.async, gcsafe.} =
   let
     message = update.message.get
     senderId = int64(message.fromUser.get().id)
@@ -453,18 +455,21 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       else:
         newMarkovGenerateOptions()
 
-    let generator = markovs.get(message.chat.id)
-    let generated = try:
-        generator.generate(options = options)
-      except MarkovGenerateError:
-        generator.generate()
+    {.cast(gcsafe).}:
+      let generator = markovs.get(message.chat.id)
+      let generated = try:
+          generator.generate(options = options)
+        except MarkovGenerateError:
+          generator.generate()
 
     if generated.isSome:
       var text = generated.get()
       if cachedSession.owoify != 0:
-        text = text.owoify(getOwoifyLevel(cachedSession.owoify))
+        {.cast(gcsafe).}:
+          text = text.owoify(getOwoifyLevel(cachedSession.owoify))
       if cachedSession.emojipasta:
-        text = emojify(text)
+        {.cast(gcsafe).}:
+          text = emojify(text)
       
       var replyToMessageId = 0
       if message.replyToMessage.isSome():
@@ -473,7 +478,11 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       if command == "markov":
         discard await bot.sendMessage(message.chat.id, text, messageThreadId=threadId, replyToMessageId = replyToMessageId)
       elif command == "quote" and not isFlood(message.chat.id, rate = 3, seconds = 20):
-        let quotePic = genQuote(text)
+        {.cast(gcsafe).}:
+          let quotePic = genQuote(
+            text = text,
+            config = quoteConfig,
+          )
         discard await bot.sendPhoto(message.chat.id, "file://" & quotePic, replyToMessageId = replyToMessageId)
         discard tryRemoveFile(quotePic)
     else:
@@ -504,13 +513,16 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
     let generator = markovs.get(message.chat.id)
     var options: seq[string]
     for i in 0 ..< 10:
-      let generated = generator.generate()
+      {.cast(gcsafe).}:
+        let generated = generator.generate()
       if generated.isSome:
         var text = generated.get()
         if cachedSession.owoify != 0:
-          text = text.owoify(getOwoifyLevel(cachedSession.owoify))
+          {.cast(gcsafe).}:
+            text = text.owoify(getOwoifyLevel(cachedSession.owoify))
         if cachedSession.emojipasta:
-          text = emojify(text)
+          {.cast(gcsafe).}:
+            text = emojify(text)
         options.add(text)
       else:
         break
@@ -559,7 +571,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
   of "hazmat":
     discard
   of "delete":
-    var deleting {.global.}: HashSet[int64]
+    var deleting {.global, threadvar.}: HashSet[int64]
 
     if message.chat.kind.endswith("group") and not isSenderAdmin:
       discard await bot.sendMessage(message.chat.id, UNALLOWED, messageThreadId=threadId)
@@ -675,7 +687,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
         messageThreadId=threadId)
 
 
-proc handleCallbackQuery(bot: Telebot, update: Update) {.async.} =
+proc handleCallbackQuery(bot: Telebot, update: Update) {.async, gcsafe.} =
   let
     callback = update.callbackQuery.get()
     userId = callback.fromUser.id
@@ -959,17 +971,24 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
       if (rand(1 .. 100) <= percentage or (percentage > 0 and repliedToMarkinim and cachedSession.alwaysReply)) and not isFlood(chatId, rate = 10, seconds = 30):
         # Max 10 messages per chat per 30 seconds
 
-        let generated = markovs.get(chatId).generate()
+        {.cast(gcsafe).}:
+          let generated = markovs.get(chatId).generate()
         if generated.isSome:
           var text = generated.get()
           if cachedSession.owoify != 0:
-            text = text.owoify(getOwoifyLevel(cachedSession.owoify))
+            {.cast(gcsafe).}:
+              text = text.owoify(getOwoifyLevel(cachedSession.owoify))
           if cachedSession.emojipasta:
-            text = emojify(text)
+            {.cast(gcsafe).}:
+              text = emojify(text)
 
           if not cachedSession.chat.quotesDisabled and rand(0 .. 30) == 20:
             # Randomly send a quote
-            let quotePic = genQuote(text)
+            {.cast(gcsafe).}:
+              let quotePic = genQuote(
+                text = text,
+                config = quoteConfig,
+              )
             discard await bot.sendPhoto(chat.chatId, "file://" & quotePic)
             discard tryRemoveFile(quotePic)
           else:
@@ -1009,6 +1028,8 @@ proc main {.async.} =
 
   conn = initDatabase(MARKOV_DB)
   defer: conn.close()
+
+  quoteConfig = getQuoteConfig()
 
   if admin != "":
     admins.incl(conn.setAdmin(userId = parseBiggestInt(admin)).userId)

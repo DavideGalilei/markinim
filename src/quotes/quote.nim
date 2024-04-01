@@ -12,41 +12,52 @@ const
   QUOTE_WIDTH = 1000
   QUOTE_HEIGHT = 1000
 
-var
-  thisDir = currentSourcePath.parentDir
-  fonts = [
-    readFont(thisDir / "Lora-BoldItalic.ttf"),
-    readFont(thisDir / "Oswald-SemiBold.ttf"),
-  ]
-  strokeFonts = [
-    readFont(thisDir / "Lora-BoldItalic.ttf"),
-    readFont(thisDir / "Oswald-SemiBold.ttf"),
-  ]
-  markinimFont = readFont(thisDir / "Montserrat-ExtraBold.ttf")
-  markinimImage = readImage(thisDir / "markinim.jpg")
+
+type QuoteConfig* = ref object
+  fonts, strokeFonts: seq[Font]
+  markinimFont: Font
+  markinimImage: Image
 
 
-for font in fonts:
-  font.size = min(QUOTE_WIDTH, QUOTE_HEIGHT) / 13
+proc getQuoteConfig*(): QuoteConfig =
+  var
+    thisDir = currentSourcePath.parentDir
+    fonts = @[
+      readFont(thisDir / "Lora-BoldItalic.ttf"),
+      readFont(thisDir / "Oswald-SemiBold.ttf"),
+    ]
+    strokeFonts = @[
+      readFont(thisDir / "Lora-BoldItalic.ttf"),
+      readFont(thisDir / "Oswald-SemiBold.ttf"),
+    ]
+    markinimFont = readFont(thisDir / "Montserrat-ExtraBold.ttf")
+    markinimImage = readImage(thisDir / "markinim.jpg")
 
-for i in 0 ..< strokeFonts.len:
-  strokeFonts[i].paint.color = color(1, 1, 1, 1)
-  strokeFonts[i].size = fonts[i].size
+  for font in fonts:
+    font.size = min(QUOTE_WIDTH, QUOTE_HEIGHT) / 13
 
-markinimFont.size = min(QUOTE_WIDTH, QUOTE_HEIGHT) / 25
+  for i in 0 ..< strokeFonts.len:
+    strokeFonts[i].paint.color = color(1, 1, 1, 1)
+    strokeFonts[i].size = fonts[i].size
 
-let tmpDir = getTempDir()
+  markinimFont.size = min(QUOTE_WIDTH, QUOTE_HEIGHT) / 25
+
+  new result
+  result.fonts = fonts
+  result.strokeFonts = strokeFonts
+  result.markinimFont = markinimFont
+  result.markinimImage = markinimImage
 
 
-proc genQuote*(text: string): string =
+proc genQuote*(text: string, config: QuoteConfig): string {.gcsafe.} =
   let
     blackWhite = rand(0 .. 1) == 1
     image = newImage(QUOTE_WIDTH, QUOTE_HEIGHT)
     finalpic = newImage(QUOTE_WIDTH, QUOTE_HEIGHT)
     paint = newPaint(LinearGradientPaint)
-    randIdx = rand(0 ..< fonts.len)
-    font = fonts[randIdx]
-    strokeFont = strokeFonts[randIdx]
+    randIdx = rand(0 ..< config.fonts.len)
+    font = config.fonts[randIdx]
+    strokeFont = config.strokeFonts[randIdx]
 
   # markinimFont.paint.color = if blackWhite: color(1, 192 / 255, 203 / 255, 1) else: color(0, 0, 0, 1)
 
@@ -84,20 +95,20 @@ proc genQuote*(text: string): string =
   )
 
   # Watermark
-  image.fillText(markinimFont, "@MarkinimBot",
-    transform = translate(vec2(image.width / 2, image.height.float - markinimFont.size * 1.5)),
+  image.fillText(config.markinimFont, "@MarkinimBot",
+    transform = translate(vec2(image.width / 2, image.height.float - config.markinimFont.size * 1.5)),
     hAlign = CenterAlign,
   )
 
-  finalpic.draw(markinimImage)
+  finalpic.draw(config.markinimImage)
   finalpic.draw(image)
-  let finalFile = tmpDir / &"markinim_quote_{genOid()}.png"
+  let finalFile = getTempDir() / &"markinim_quote_{genOid()}.png"
   finalpic.writeFile(finalFile)
   return finalFile
 
 
 when isMainModule:
-  let im = genQuote("Markinim quotes update")
+  let im = genQuote("Markinim quotes update", fonts, strokeFonts, markinimFont, markinimImage)
   echo im
   copyFile(im, "test.png")
   discard tryRemoveFile(im)
