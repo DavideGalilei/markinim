@@ -12,5 +12,10 @@
   ➼ /delete - Delete the current session and its messages
   ➼ /deletefrom (groups only, in reply to someone) - Delete all the messages a user sent in a group *from my database* (to filter spammers)
 
+⨭ *Data Safety*
+  ➼ /deleteme - Delete all your data from my database (works in private chats only)
+  ➼ /privacy - Read the privacy policy
+  ➼ /manageconsent - Manage your data consent
+
 *NOTE*: experimental features marked with a *beta* label.
 🌺 If you encounter any issue, please contact my owner, more information and FAQ on @Markinim :D

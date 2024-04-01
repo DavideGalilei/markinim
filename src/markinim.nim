@@ -262,6 +262,26 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       replyMarkup = newInlineKeyboardMarkup(@[InlineKeyboardButton(text: "Add me :D", url: some &"https://t.me/{bot.username}?startgroup=enable")]),
       messageThreadId=threadId,
     )
+  of "deleteme":
+    if message.chat.id != senderId: # /deleteme only works in PMs
+      return
+
+    if len(args) > 0 and args[0] == "confirm":
+      let count = conn.deleteAllMessagesFromUser(userId = senderId)
+      discard await bot.sendMessage(message.chat.id,
+        &"Operation completed. Successfully deleted `{count}` messages from my database!" &
+        "\nNote: some messages might still be cached in the bot's memory in the compiled markov model, they will expire soon (at most in 4 hours, after the bot restarts for its backup procedure)" &
+        "\nIf this is an urgent matter, please contact my creator. You can find more information on the bot's bio.",
+        parseMode = "markdown",
+        messageThreadId=threadId)
+      return
+
+    let count = conn.getTotalUserMessagesCount(userId = senderId)
+    discard await bot.sendMessage(message.chat.id,
+      &"This command will delete all your {count} messages from my database. Are you sure? Send `/deleteme confirm` to confirm.",
+      parseMode = "markdown",
+      messageThreadId=threadId,
+    )
   of "help":
     if message.chat.kind.endswith("group") and not isSenderAdmin:
       return

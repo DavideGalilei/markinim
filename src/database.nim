@@ -230,6 +230,23 @@ proc deleteFromUserInChat*(conn: DbConn, session: Session, userId: int64): int64
   ]
   conn.exec(sql query, params)
 
+proc getTotalUserMessagesCount*(conn: DbConn, userId: int64): int64 {.gcsafe.} =
+  let query = "SELECT COUNT(*) FROM messages WHERE sender = (SELECT id FROM users WHERE userId = ? LIMIT 1)"
+  let params = @[
+    DbValue(kind: dvkInt, i: userId),
+  ]
+  return get conn.getValue(int64, sql query, params)
+
+proc deleteAllMessagesFromUser*(conn: DbConn, userId: int64): int64 {.gcsafe.} =
+  # return count of deleted messages
+  let count = conn.getTotalUserMessagesCount(userId)
+  var query = "DELETE FROM messages WHERE sender = (SELECT id FROM users WHERE userId = ? LIMIT 1)"
+  var params = @[
+    DbValue(kind: dvkInt, i: userId),
+  ]
+  conn.exec(sql query, params)
+  return count
+
 proc getBotAdmins*(conn: DbConn): seq[User] {.gcsafe.} =
   result = @[User()]
   conn.select(result, "admin")
@@ -271,15 +288,15 @@ when isMainModule:
 
   discard os.tryRemoveFile(DATA_FOLDER / "markov.db")
 
-  let conn = initDatabase()
+  let dbconn = initDatabase()
   var user = User(userId: 5001234567)
 
-  with conn:
+  with dbconn:
     insert user
 
   var selected = User()
-  conn.select(selected, "users.userId = ?", 5001234567)
+  dbconn.select(selected, "users.userId = ?", 5001234567)
   echo selected[]
 
-  echo conn.getUser(5001234567)[]
-  echo conn.getUser(1234)[]
+  echo dbconn.getUser(5001234567)[]
+  echo dbconn.getUser(1234)[]
