@@ -10,7 +10,7 @@ bin           = @["markinim"]
 
 # Dependencies
 
-requires "nim >= 1.4.0"
+requires "nim >= 2.0.2"
 requires "pixie"
 requires "norm == 2.8.0"
 # requires "telebot == 2023.08.22"
