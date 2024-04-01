@@ -1200,8 +1200,8 @@ proc main {.async.} =
     try:
       await bot.pollAsync(timeout = 100, clean = true)
     except:  #  Exception, Defect, IndexDefect
-      echoError "getCurrentExceptionMsg(): ", getCurrentExceptionMsg()
       echoError "Fatal error occurred. Restarting the bot..."
+      echoError "getCurrentExceptionMsg(): ", getCurrentExceptionMsg()
       await sleepAsync(5000) # sleep 5 seconds and retry again
 
 
