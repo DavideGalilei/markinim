@@ -41,7 +41,9 @@ const
   UNALLOWED = "You are not allowed to perform this command"
   CREATOR_STRING = " Please contact my creator if you think this is a mistake (more information on @Markinim)"
   SETTINGS_TEXT = "Tap on a button to toggle an option. Use /percentage to change the ratio of answers from the bot. Use /sessions to manage the sessions."
+  CONSENT_TEXT = "Markinim is an opt-in service. With the options below, you can manage your data settings. For more information, see /privacy."
   HELP_TEXT = staticRead(root / "help.md")
+  PRIVACY_TEXT = staticRead(root / "privacy.md")
 
 
 let
@@ -238,9 +240,12 @@ proc getSettingsKeyboard(session: Session): InlineKeyboardMarkup =
     @[
       InlineKeyboardButton(text: &"Randomly quote messages {asEmoji(session.randomReplies)}", callbackData: some &"randomreplies_{chatId}_{session.uuid}"),
     ],
+    @[
+      InlineKeyboardButton(text: &"Pause learning {asEmoji(session.learningPaused)}", callbackData: some &"pauselearning_{chatId}_{session.uuid}"),
+    ],
   )
 
-proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[string]) {.async, gcsafe.} =
+proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[string], dbUser: database.User) {.async, gcsafe.} =
   let
     message = update.message.get
     senderId = int64(message.fromUser.get().id)
@@ -252,11 +257,34 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
 
   case command:
   of "start":
-    const startMessage = "Hello, I learn from your messages and try to formulate my own sentences. Add me in a chat or send /enable to try me out here ᗜᴗᗜ"
+    const startMessage = (
+      "Hello, I learn from your messages and try to formulate my own sentences. Add me in a chat or send /enable to try me out here ᗜᴗᗜ" &
+      "\nSee /help for more information, and /privacy for my privacy policy."
+    )
     if message.chat.id != senderId: # /start only works in PMs
-      if len(args) > 0 and args[0] == "enable":
-        discard await bot.sendMessage(message.chat.id, startMessage, messageThreadId=threadId)
+      if len(args) > 0:
+        if args[0] == "enable":
+          discard await bot.sendMessage(message.chat.id, startMessage, messageThreadId=threadId)
+        else:
+          discard await bot.sendMessage(message.chat.id, startMessage, messageThreadId=threadId)
       return
+
+    if len(args) > 0:
+      # Private chat, /start with arguments
+      if args[0] == "consent":
+        discard await bot.sendMessage(message.chat.id,
+          CONSENT_TEXT,
+          replyMarkup = newInlineKeyboardMarkup(
+            @[
+              if dbUser.consented:
+                InlineKeyboardButton(text: "Revoke consent", callbackData: some "consent_revoke")
+              else:
+                InlineKeyboardButton(text: "Give consent", callbackData: some "consent_give")
+            ],
+          ),
+          messageThreadId=threadId)
+        return
+
     discard await bot.sendMessage(message.chat.id,
       startMessage,
       replyMarkup = newInlineKeyboardMarkup(@[InlineKeyboardButton(text: "Add me :D", url: some &"https://t.me/{bot.username}?startgroup=enable")]),
@@ -286,6 +314,29 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
     if message.chat.kind.endswith("group") and not isSenderAdmin:
       return
     discard await bot.sendMessage(message.chat.id, HELP_TEXT, parseMode = "markdown", messageThreadId=threadId)
+  of "privacy":
+    if message.chat.id != senderId: # /privacy only works in PMs
+      return
+    discard await bot.sendMessage(message.chat.id,
+      PRIVACY_TEXT,
+      parseMode = "markdown",
+      messageThreadId=threadId)
+  of "manageconsent":
+    if message.chat.id != senderId: # /manageconsent only works in PMs
+      return
+
+    discard await bot.sendMessage(message.chat.id,
+      CONSENT_TEXT,
+      replyMarkup = newInlineKeyboardMarkup(
+        @[
+          if dbUser.consented:
+            InlineKeyboardButton(text: "Revoke consent", callbackData: some "consent_revoke")
+          else:
+            InlineKeyboardButton(text: "Give consent", callbackData: some "consent_give")
+        ],
+      ),
+      messageThreadId=threadId)
+    return
   of "admin", "unadmin", "remadmin":
     if len(args) < 1:
       return
@@ -389,12 +440,24 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       return
 
     discard conn.setEnabled(message.chat.id, enabled = (command == "enable"))
+    if command == "enable":
+      var dbUser = conn.getOrInsert(database.User(userId: senderId))
+      dbUser.consented = true
+      conn.update(dbUser)
 
-    discard await bot.sendMessage(message.chat.id,
-      if command == "enable": "Successfully enabled learning in this chat"
-      else: "Successfully disabled learning in this chat",
-      messageThreadId=threadId,
-    )
+    if message.chat.kind.endswith("group"):
+      discard await bot.sendMessage(message.chat.id,
+        if command == "enable": "Successfully enabled learning in this chat"
+        else: "Successfully disabled learning in this chat. If you want to enable it, send /enable.",
+        messageThreadId=threadId,
+      )
+    else:
+      discard await bot.sendMessage(message.chat.id,
+        if command == "enable": "Successfully enabled learning in this chat"
+        else: "Successfully disabled learning in this chat. If you want to enable it, send /enable." &
+          "\nNote: the bot will still learn in groups where it is enabled. If you don't want this, check out /manageconsent.",
+        messageThreadId=threadId,
+      )
   of "sessions":
     if message.chat.kind.endswith("group") and not isSenderAdmin:
       discard await bot.sendMessage(message.chat.id, UNALLOWED, messageThreadId=threadId)
@@ -427,6 +490,15 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
         messageThreadId=threadId)
       return
 
+    if not message.chat.kind.endswith("group") and not dbUser.consented:
+      discard await bot.sendMessage(
+        message.chat.id,
+        &"❕ You have not given consent to the bot's learning. Please [click here](https://t.me/{bot.username}?start=consent) to manage your data settings.",
+        parseMode = "markdown",
+        disableWebPagePreview = true,
+        messageThreadId=threadId)
+      return
+
     try:
       let percentage = parseInt(args[0].strip(chars = Whitespace + {'%'}))
 
@@ -449,6 +521,14 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       discard bot.sendMessage(
         message.chat.id,
         "Learning is not enabled in this chat. Enable it with /enable (for groups: admins only)",
+        messageThreadId=threadId)
+      return
+
+    if not dbUser.consented:
+      discard bot.sendMessage(
+        message.chat.id,
+        &"❕ You have not given consent to the bot's learning. Please [click here](https://t.me/{bot.username}?start=consent) to manage your data settings.",
+        parseMode = "markdown",
         messageThreadId=threadId)
       return
 
@@ -516,6 +596,14 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
         messageThreadId=threadId)
       return
 
+    if not dbUser.consented:
+      discard bot.sendMessage(
+        message.chat.id,
+        &"❕ You have not given consent to the bot's learning. Please [click here](https://t.me/{bot.username}?start=consent) to manage your data settings.",
+        parseMode = "markdown",
+        messageThreadId=threadId)
+      return
+
     let cachedSession = conn.getCachedSession(message.chat.id)
 
     if cachedSession.chat.pollsDisabled:
@@ -565,14 +653,14 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
       messageThreadId = threadId,
       isAnonymous = isAnon,  # currently not working idk why
     )
-  of "export":
+  #[ of "export":
     if senderId notin admins:
       # discard await bot.sendMessage(message.chat.id, UNALLOWED, messageThreadId=threadId)
       return
     let tmp = getTempDir()
     copyFileToDir(DATA_FOLDER / MARKOV_DB, tmp)
     discard await bot.sendDocument(senderId, "file://" & (tmp / MARKOV_DB))
-    discard tryRemoveFile(tmp / MARKOV_DB)
+    discard tryRemoveFile(tmp / MARKOV_DB) ]#
   of "settings":
     if message.chat.kind.endswith("group") and not isSenderAdmin:
       discard await bot.sendMessage(message.chat.id, UNALLOWED, messageThreadId=threadId)
@@ -837,6 +925,24 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async, gcsafe.} =
       of "nothing":
         discard await bot.answerCallbackQuery(callback.id, "This button serves no purpose! ☔️", showAlert = true)
         return
+      of "consent":
+        var dbUser = conn.getOrInsert(database.User(userId: userId))
+        dbUser.consented = args[0] == "give"
+        conn.update(dbUser)
+        discard await bot.answerCallbackQuery(callback.id, "Your consent settings have been successfully updated!", showAlert = true)
+        discard await bot.editMessageText(chatId = $callback.message.get().chat.id,
+          messageId = callback.message.get().messageId,
+          text = CONSENT_TEXT,
+          replyMarkup = newInlineKeyboardMarkup(
+            @[
+              if dbUser.consented:
+                InlineKeyboardButton(text: "Revoke consent", callbackData: some "consent_revoke")
+              else:
+                InlineKeyboardButton(text: "Give consent", callbackData: some "consent_give")
+            ],
+          ),
+          parseMode = "markdown",
+        )
       of "usernames":
         adminCheck()
         var session = conn.getCachedSession(parseBiggestInt(args[0]))
@@ -885,6 +991,12 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async, gcsafe.} =
         session.randomReplies = not session.randomReplies
         conn.update(session)
         editSettings()
+      of "pauselearning":
+        adminCheck()
+        var session = conn.getCachedSession(parseBiggestInt(args[0]))
+        session.learningPaused = not session.learningPaused
+        conn.update(session)
+        editSettings()
       of "sfw":
         adminCheck()
         var session = conn.getCachedSession(parseBiggestInt(args[0]))
@@ -901,15 +1013,14 @@ proc handleCallbackQuery(bot: Telebot, update: Update) {.async, gcsafe.} =
         var session = conn.getCachedSession(parseBiggestInt(args[0]))
         session.owoify = (session.owoify + 1) mod 4
         conn.update(session)
-
         editSettings()
       of "emojipasta":
         adminCheck()
         var session = conn.getCachedSession(parseBiggestInt(args[0]))
         session.emojipasta = not session.emojipasta
         conn.update(session)
-
         editSettings()
+
     # After any callback query
     discard await bot.answerCallbackQuery(callback.id, "Done!")
   except IOError as err:
@@ -952,6 +1063,8 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
         command = splitted[0].strip(chars = {'/'}, trailing = false)
         args = if len(splitted) > 1: splitted[1 .. ^1] else: @[]
 
+      let user = conn.getOrInsert(database.User(userId: msgUser.id))
+
       if text.startswith('/'):
         if msgUser.id notin admins and isFlood(chatId):
           return true
@@ -961,7 +1074,7 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
           if splittedCommand[^1].toLower() != bot.username.toLower():
             return true
           command = splittedCommand[0]
-        await handleCommand(bot, update, command, args)
+        await handleCommand(bot, update, command, args, user)
         return true
 
       let chat = conn.getOrInsert(database.Chat(chatId: chatId))
@@ -972,13 +1085,23 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
 
       if not cachedSession.isMessageOk(text):
         return
-      elif not markovs.hasKeyOrPut(chatId, (unixTime(), newMarkov(@[text], asLower = not cachedSession.caseSensitive))):
+      elif not markovs.hasKeyOrPut(chatId, (unixTime(), newMarkov((if user.consented and not cachedSession.learningPaused: @[text] else: @[]), asLower = not cachedSession.caseSensitive))):
         conn.refillMarkov(cachedSession)
       else:
-        markovs.get(chatId).addSample(text, asLower = not cachedSession.caseSensitive)
+        if user.consented and not cachedSession.learningPaused:
+          markovs.get(chatId).addSample(text, asLower = not cachedSession.caseSensitive)
 
-      let user = conn.getOrInsert(database.User(userId: msgUser.id))
-      conn.addMessage(database.Message(text: text, sender: user, session: conn.getCachedSession(chat.chatId)))
+      if user.consented and not cachedSession.learningPaused:
+        conn.addMessage(database.Message(text: text, sender: user, session: conn.getCachedSession(chat.chatId)))
+
+      if not response.chat.kind.endswith("group") and not user.consented:
+        discard await bot.sendMessage(
+          chatId,
+          &"❕ You have not given consent to the bot's learning. Please [click here](https://t.me/{bot.username}?start=consent) to manage your data settings.",
+          parseMode = "markdown",
+          disableWebPagePreview = true,
+          messageThreadId=threadId)
+        return
 
       var percentage = chat.percentage
       let replyMessage = update.message.get().replyToMessage
