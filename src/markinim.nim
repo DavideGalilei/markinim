@@ -496,6 +496,7 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
         &"❕ You have not given consent to the bot's learning. Please [click here](https://t.me/{bot.username}?start=consent) to manage your data settings.",
         parseMode = "markdown",
         disableWebPagePreview = true,
+        replyToMessageId = message.messageId,
         messageThreadId=threadId)
       return
 
@@ -529,6 +530,8 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
         message.chat.id,
         &"❕ You have not given consent to the bot's learning. Please [click here](https://t.me/{bot.username}?start=consent) to manage your data settings.",
         parseMode = "markdown",
+        replyToMessageId = message.messageId,
+        disableWebPagePreview = true,
         messageThreadId=threadId)
       return
 
@@ -601,6 +604,8 @@ proc handleCommand(bot: Telebot, update: Update, command: string, args: seq[stri
         message.chat.id,
         &"❕ You have not given consent to the bot's learning. Please [click here](https://t.me/{bot.username}?start=consent) to manage your data settings.",
         parseMode = "markdown",
+        replyToMessageId = message.messageId,
+        disableWebPagePreview = true,
         messageThreadId=threadId)
       return
 
@@ -1099,6 +1104,7 @@ proc updateHandler(bot: Telebot, update: Update): Future[bool] {.async, gcsafe.}
           chatId,
           &"❕ You have not given consent to the bot's learning. Please [click here](https://t.me/{bot.username}?start=consent) to manage your data settings.",
           parseMode = "markdown",
+          replyToMessageId = response.messageId,
           disableWebPagePreview = true,
           messageThreadId=threadId)
         return
