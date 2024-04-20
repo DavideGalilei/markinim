@@ -45,7 +45,9 @@ with csv_file.open() as f:
         if session_id is None:
             session_id = int(row["session"])
 
-        assert session_id == int(row["session"]), "All messages should belong to the same session"
+        assert session_id == int(
+            row["session"]
+        ), "All messages should belong to the same session"
 
         messages.append(
             Message(

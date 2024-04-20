@@ -1,11 +1,7 @@
 # python3 tools/data_removal.py --chat-id=-100123456789 --replace-text="Hello, world!" --with-text=" "
 
-import orjson
 import argparse
 import sqlite3
-import traceback
-
-import datetime
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -26,9 +22,15 @@ markovdb = root / "data" / "markov.db"
 parser = argparse.ArgumentParser(
     description="Replace text from messages in the database"
 )
-parser.add_argument("--chat-id", type=int, required=True, help="The chat id to remove messages from")
-parser.add_argument("--replace-text", type=str, required=True, help="The text to replace")
-parser.add_argument("--with-text", type=str, required=True, help="The text to replace with")
+parser.add_argument(
+    "--chat-id", type=int, required=True, help="The chat id to remove messages from"
+)
+parser.add_argument(
+    "--replace-text", type=str, required=True, help="The text to replace"
+)
+parser.add_argument(
+    "--with-text", type=str, required=True, help="The text to replace with"
+)
 args = parser.parse_args()
 
 chat_id = args.chat_id
@@ -98,7 +100,7 @@ with sqlite3.connect(markovdb) as conn:
                         messages=[],
                     )
                 )
-        
+
         # Total sessions
         console.print(f"[bold green]Total sessions: {len(chat.sessions)}[/bold green]")
 
@@ -107,7 +109,10 @@ with sqlite3.connect(markovdb) as conn:
         total_deleted = 0
         total_updated = 0
         for session in chat.sessions:
-            cursor.execute("SELECT COUNT(*) AS total_messages FROM messages WHERE session = ?", (session.session_id,))
+            cursor.execute(
+                "SELECT COUNT(*) AS total_messages FROM messages WHERE session = ?",
+                (session.session_id,),
+            )
             total_messages += cursor.fetchone()["total_messages"]
 
         if total_messages == 0:
@@ -118,7 +123,9 @@ with sqlite3.connect(markovdb) as conn:
         task = progress.add_task("Replacing text", total=total_messages)
 
         for session in chat.sessions:
-            cursor.execute("SELECT * FROM messages WHERE session = ?", (session.session_id,))
+            cursor.execute(
+                "SELECT * FROM messages WHERE session = ?", (session.session_id,)
+            )
 
             while True:
                 messages = cursor.fetchmany(100)
@@ -133,10 +140,15 @@ with sqlite3.connect(markovdb) as conn:
                     if replace_text in text:
                         new_text = text.replace(replace_text, with_text)
                         if not new_text.strip():
-                            cursor.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+                            cursor.execute(
+                                "DELETE FROM messages WHERE id = ?", (message_id,)
+                            )
                             total_deleted += 1
                         else:
-                            cursor.execute("UPDATE messages SET text = ? WHERE id = ?", (new_text, message_id))
+                            cursor.execute(
+                                "UPDATE messages SET text = ? WHERE id = ?",
+                                (new_text, message_id),
+                            )
                             total_updated += 1
 
     console.print("[bold green]Committing changes...[/bold green]")
@@ -147,4 +159,6 @@ with sqlite3.connect(markovdb) as conn:
     conn.commit()
     console.print("[bold green]Database vacuumed[/bold green]")
     # Done! Total messages: 1000, deleted: 100, updated: 900
-    console.print(f"[bold green]Done! Total messages: {total_messages}, deleted: {total_deleted}, updated: {total_updated}[/bold green]")
+    console.print(
+        f"[bold green]Done! Total messages: {total_messages}, deleted: {total_deleted}, updated: {total_updated}[/bold green]"
+    )

@@ -1,13 +1,12 @@
 # python3 tools/gdpr_export.py --user-id=12345678 --output-dir=/tmp/export
 
-import orjson
 import argparse
+import datetime
 import sqlite3
 import traceback
-
-import datetime
 from pathlib import Path
 
+import orjson
 from pydantic import BaseModel
 from rich.console import Console
 from rich.progress import Progress
@@ -54,11 +53,14 @@ CREATE TABLE "users"(userId INTEGER NOT NULL UNIQUE, admin INTEGER NOT NULL, ban
 root = Path(__file__).parent.parent
 markovdb = root / "data" / "markov.db"
 
-parser = argparse.ArgumentParser(
-    description="Export messages from the database"
-)
+parser = argparse.ArgumentParser(description="Export messages from the database")
 parser.add_argument("--user-id", type=int, required=True, help="The user id to export")
-parser.add_argument("--output-file", type=Path, required=True, help="The output file to write the export to")
+parser.add_argument(
+    "--output-file",
+    type=Path,
+    required=True,
+    help="The output file to write the export to",
+)
 args = parser.parse_args()
 
 console = Console()
@@ -115,28 +117,28 @@ with sqlite3.connect(markovdb) as conn:
         # get user
         user_id: UserId = args.user_id
         user = conn.execute(
-            "SELECT * FROM users WHERE userId = ?",
-            (user_id,)
+            "SELECT * FROM users WHERE userId = ?", (user_id,)
         ).fetchone()
 
         if user is None:
             console.print(f"[red]User not found: {user_id}[/red]")
             exit(1)
-        
+
         # get messages count
         total_messages = conn.execute(
             "SELECT COUNT(*) AS total_messages FROM messages WHERE sender = ?",
-            (user["id"],)
+            (user["id"],),
         ).fetchone()["total_messages"]
 
-        console.print(f"[bold green]Exporting {total_messages} messages for user {user_id}...[/bold green]")
+        console.print(
+            f"[bold green]Exporting {total_messages} messages for user {user_id}...[/bold green]"
+        )
 
         with Progress() as progress:
             task = progress.add_task("Exporting messages...", total=total_messages)
 
             messages_sent_by_user = conn.execute(
-                "SELECT * FROM messages WHERE sender = ?",
-                (user["id"],)
+                "SELECT * FROM messages WHERE sender = ?", (user["id"],)
             )
 
             cached_chats: dict[InternalChatId, Chat] = {}
@@ -153,49 +155,42 @@ with sqlite3.connect(markovdb) as conn:
 
                     if session_id not in cached_sessions:
                         this_session = conn.execute(
-                            "SELECT * FROM sessions WHERE id = ?",
-                            (session_id,)
+                            "SELECT * FROM sessions WHERE id = ?", (session_id,)
                         ).fetchone()
 
                         cached_sessions[session_id] = Session(
                             session_id=session_id,
                             session_name=this_session["name"],
-                            messages=[]
+                            messages=[],
                         )
 
                     cached_sessions[session_id].messages.append(
-                        Message(
-                            id=message["id"],
-                            text=message["text"]
-                        )
+                        Message(id=message["id"], text=message["text"])
                     )
-            
+
             for session in cached_sessions.values():
                 internal_chat_id: InternalChatId = conn.execute(
-                    "SELECT chat FROM sessions WHERE id = ?",
-                    (session.session_id,)
+                    "SELECT chat FROM sessions WHERE id = ?", (session.session_id,)
                 ).fetchone()["chat"]
 
                 if internal_chat_id not in cached_chats:
                     this_chat = conn.execute(
-                        "SELECT * FROM chats WHERE id = ?",
-                        (internal_chat_id,)
+                        "SELECT * FROM chats WHERE id = ?", (internal_chat_id,)
                     ).fetchone()
 
                     cached_chats[internal_chat_id] = Chat(
-                        chat_id=this_chat["chatId"],
-                        sessions=[]
+                        chat_id=this_chat["chatId"], sessions=[]
                     )
 
                 cached_chats[internal_chat_id].sessions.append(session)
-            
+
             export_data = ExportData(
                 export_date=datetime.datetime.now(tz=datetime.UTC),
                 user_id=user_id,
                 banned=user["banned"],
                 consented=user["consented"],
                 total_messages=total_messages,
-                chats=list(cached_chats.values())
+                chats=list(cached_chats.values()),
             )
     except Exception:
         console.print(traceback.format_exc())
@@ -206,4 +201,6 @@ with console.status("[bold green]Writing export data..."):
     with output_file.open("wb") as f:
         f.write(orjson.dumps(export_data.model_dump(), option=orjson.OPT_INDENT_2))
 
-    console.print(f"[bold green]Exported {total_messages} messages to {output_file}[/bold green]")
+    console.print(
+        f"[bold green]Exported {total_messages} messages to {output_file}[/bold green]"
+    )
