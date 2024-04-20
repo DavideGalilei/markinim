@@ -1,4 +1,4 @@
-# python3 tools/data_removal.py --chat-id=-100123456789 --replace-text="Hello, world!" --with-text=" "
+# python3 tools/data_removal.py --chat-id=-100123456789 --replace-text="Hello, world!" --with-text=""  [--markovdb=/path/to/markov.db]
 
 import argparse
 import sqlite3
@@ -17,7 +17,6 @@ CREATE TABLE "users"(userId INTEGER NOT NULL UNIQUE, admin INTEGER NOT NULL, ban
 """
 
 root = Path(__file__).parent.parent
-markovdb = root / "data" / "markov.db"
 
 parser = argparse.ArgumentParser(
     description="Replace text from messages in the database"
@@ -31,11 +30,18 @@ parser.add_argument(
 parser.add_argument(
     "--with-text", type=str, required=True, help="The text to replace with"
 )
+parser.add_argument(
+    "--markovdb",
+    type=Path,
+    default=root / "data" / "markov.db",
+    help="The path to the markov database",
+)
 args = parser.parse_args()
 
 chat_id = args.chat_id
 replace_text = args.replace_text
 with_text = args.with_text
+markovdb = args.markovdb
 
 console = Console()
 

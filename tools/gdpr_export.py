@@ -1,4 +1,4 @@
-# python3 tools/gdpr_export.py --user-id=12345678 --output-dir=/tmp/export
+# python3 tools/gdpr_export.py --user-id=12345678 --output-dir=/tmp/export [--markovdb=/path/to/markov.db]
 
 import argparse
 import datetime
@@ -51,7 +51,6 @@ CREATE TABLE "users"(userId INTEGER NOT NULL UNIQUE, admin INTEGER NOT NULL, ban
 """
 
 root = Path(__file__).parent.parent
-markovdb = root / "data" / "markov.db"
 
 parser = argparse.ArgumentParser(description="Export messages from the database")
 parser.add_argument("--user-id", type=int, required=True, help="The user id to export")
@@ -61,12 +60,19 @@ parser.add_argument(
     required=True,
     help="The output file to write the export to",
 )
+parser.add_argument(
+    "--markovdb",
+    type=Path,
+    default=root / "data" / "markov.db",
+    help="The path to the markov database",
+)
 args = parser.parse_args()
 
 console = Console()
 
 output_file = args.output_file
 output_dir = output_file.parent
+markovdb = args.markovdb
 if not output_dir.exists() or not output_dir.is_dir():
     console.print(f"[red]Directory not found: {output_dir}[/red]")
     exit(1)
@@ -92,6 +98,7 @@ class Message(BaseModel):
 class Session(BaseModel):
     session_id: SessionId
     session_name: str
+    deleted: bool
     messages: list[Message]
 
 
@@ -105,6 +112,7 @@ class ExportData(BaseModel):
     user_id: UserId
     banned: bool
     consented: bool
+    total_chats: int
     total_messages: int
     chats: list[Chat]
 
@@ -143,6 +151,7 @@ with sqlite3.connect(markovdb) as conn:
 
             cached_chats: dict[InternalChatId, Chat] = {}
             cached_sessions: dict[SessionId, Session] = {}
+            session_internal_chat_ids: dict[SessionId, InternalChatId] = {}
 
             while True:
                 messages_sent_by_user_chunk = messages_sent_by_user.fetchmany(1000)
@@ -160,8 +169,12 @@ with sqlite3.connect(markovdb) as conn:
 
                         cached_sessions[session_id] = Session(
                             session_id=session_id,
-                            session_name=this_session["name"],
+                            deleted=this_session is None,
+                            session_name=this_session["name"] if this_session else "",
                             messages=[],
+                        )
+                        session_internal_chat_ids[session_id] = (
+                            this_session["chat"] if this_session else -1
                         )
 
                     cached_sessions[session_id].messages.append(
@@ -169,26 +182,38 @@ with sqlite3.connect(markovdb) as conn:
                     )
 
             for session in cached_sessions.values():
-                internal_chat_id: InternalChatId = conn.execute(
-                    "SELECT chat FROM sessions WHERE id = ?", (session.session_id,)
-                ).fetchone()["chat"]
+                internal_chat_id: InternalChatId = session_internal_chat_ids[
+                    session.session_id
+                ]
 
-                if internal_chat_id not in cached_chats:
-                    this_chat = conn.execute(
-                        "SELECT * FROM chats WHERE id = ?", (internal_chat_id,)
-                    ).fetchone()
+                if internal_chat_id != -1:
+                    if internal_chat_id not in cached_chats:
+                        this_chat = conn.execute(
+                            "SELECT * FROM chats WHERE id = ?", (internal_chat_id,)
+                        ).fetchone()
 
-                    cached_chats[internal_chat_id] = Chat(
-                        chat_id=this_chat["chatId"], sessions=[]
+                        cached_chats[internal_chat_id] = Chat(
+                            chat_id=this_chat["chatId"], sessions=[]
+                        )
+
+                    cached_chats[internal_chat_id].sessions.append(session)
+                else:
+                    console.print(
+                        f"[red]Session {session.session_id} has no chat associated with it[/red]"
                     )
-
-                cached_chats[internal_chat_id].sessions.append(session)
+                    if internal_chat_id not in cached_chats:
+                        console.print(
+                            f"[red]Creating a new fallback chat for session {session.session_id}[/red]"
+                        )
+                        cached_chats[internal_chat_id] = Chat(chat_id=-1, sessions=[])
+                    cached_chats[internal_chat_id].sessions.append(session)
 
             export_data = ExportData(
                 export_date=datetime.datetime.now(tz=datetime.UTC),
                 user_id=user_id,
                 banned=user["banned"],
                 consented=user["consented"],
+                total_chats=len(cached_chats),
                 total_messages=total_messages,
                 chats=list(cached_chats.values()),
             )
