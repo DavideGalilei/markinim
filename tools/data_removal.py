@@ -50,9 +50,9 @@ if not markovdb.exists():
     exit(1)
 
 
-type ChatId = int
-type SessionId = int
-type MessageId = int
+ChatId = int
+SessionId = int
+MessageId = int
 
 
 class Message(BaseModel):
