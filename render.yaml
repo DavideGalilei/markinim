@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: markinim-bot
+    env: docker
+    repo: https://github.com/ziyosen/botTele
+    branch: main
+    dockerfilePath: ./Dockerfile
+    autoDeploy: true
+    plan: free
