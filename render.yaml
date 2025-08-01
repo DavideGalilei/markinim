@@ -4,6 +4,6 @@ services:
     env: docker
     repo: https://github.com/ziyosen/botTele
     branch: main
-    dockerfilePath: ./Dockerfile
+    dockerfilePath: ./.env.sample
     autoDeploy: true
     plan: free
