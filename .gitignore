@@ -10,3 +10,5 @@ backup/*
 
 tools/backup_script.sh
 tools/backup.sh
+
+**/__pycache__
